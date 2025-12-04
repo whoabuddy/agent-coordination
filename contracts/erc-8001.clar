@@ -440,7 +440,7 @@
       (match acc-opt
         acc {fresh: (and (get fresh accum) (>= (get accept-expiry acc) (get now accum))), 
              now: (get now accum), intent-hash: (get intent-hash accum)}
-        none {fresh: false, now: (get now accum), intent-hash: (get intent-hash accum)}
+        {fresh: false, now: (get now accum), intent-hash: (get intent-hash accum)}
       )
     )
   )
