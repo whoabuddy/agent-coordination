@@ -1,9 +1,31 @@
-;; ERC-8001 Agent Coordination (Stacks SIP-XXX / EIP-8001 adapted)
-;; Minimal multi-party coordination primitive using signed intents and acceptances.
-;; Assumes standard principals (EOA-like agents); contract wallets via future ERC1271 equiv out-of-scope.
-;; Uses sha256 (Clarity-native; equivalent to keccak for domain separation).
-;; Max 20 participants (decidable cost ~O(20^2) worst).
-;; Status lifecycle: None -> Proposed -> (Ready -> Executed) | Cancelled | Expired.
+;; ERC-8001 Agent Coordination (Stacks SIP-XXX / EIP-8001 port)
+;; Minimal single-chain multi-party coordination: propose AgentIntent (tx-prove), accept via EIP-712 sigs.
+;; Core state machine only (no exec logic; modules add). Standard principals; sha256/BE32 ABI-pack.
+;; Ref: https://eips.ethereum.org/EIPS/eip-8001
+;; Trait: IAgentCoordination (below); max 20 parts (O(20^2) decidable).
+;; Usage ex: Propose w/ sorted participants (inc agent), off-chain sign accept-digest (nonce=0), execute w/ payload.
+;; Test outline: Clarinet (propose/acceptN/ready/execute; cancel/expire edge; invalid sig/sort/nonce/expiry).
+
+(define-trait IAgentCoordination
+  (
+    ;; Propose (tx-sender=agent; no sig; returns intentHash)
+    (propose-coordination (buff 32) uint uint (buff 32) uint (list 20 principal)) (response (buff 32) uint)
+    ;; Accept (tx-sender=participant; sig over acceptance-digest; returns all-accepted?)
+    (accept-coordination (buff 32) uint (buff 32) (buff 65)) (response bool uint)
+    ;; Execute (any; verify payload/sha256==payloadHash/all-fresh; returns (success result); state Executed)
+    (execute-coordination (buff 32) (buff 1024) (buff 1024)) (response bool (buff 1024))
+    ;; Cancel (agent pre-expiry/any post; reason opt; state Cancelled)
+    (cancel-coordination (buff 32) (string-ascii 34)) (response bool uint)
+    ;; Status (effective inc auto-Expired; accepted-by list)
+    (get-coordination-status (buff 32)) (response
+      {status: uint, agent: principal, participants: (list 20 principal), accepted-by: (list 20 principal), expiry: uint}
+      uint)
+    ;; Required = len(participants)
+    (get-required-acceptances (buff 32)) (response uint uint)
+    ;; Nonce (latest used)
+    (get-agent-nonce (principal)) uint
+  )
+)
 
 (define-constant NONE u0)
 (define-constant PROPOSED u1)

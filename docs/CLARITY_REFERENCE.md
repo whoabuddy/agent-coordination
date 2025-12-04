@@ -320,6 +320,14 @@ Compact guide for Clarity contract development. Use for generating secure, decid
   (fold send-maybe recipients (ok true)))
 ```
 
+### Multi-Party Coordination (ERC-8001/SIP-XXX)
+
+All-party sig agg w/ expiry/nonce/replay prot. Propose intent (sorted participants), accepts via off-chain EIP712-like sig (recover on-chain), execute if Ready/fresh/payload-match.
+
+Ref: `contracts/erc-8001.clar` (max20 decidable; sha256/BE32; trait IAgentCoordination).
+
+Ex: Propose → N accepts → status Ready → execute (payload); cancel/expire edges.
+
 ### Parent-Child Maps (hierarchical, paginated)
 
 ```

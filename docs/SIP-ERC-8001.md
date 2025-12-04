@@ -12,21 +12,73 @@ Sign-off: _(pending)_
 
 # Abstract
 
-This proposal ports Ethereum's ERC-8001 as a Stacks SIP standard primitive for secure multi-party agent coordination. An initiator proposes an **AgentIntent** (EIP-712 typed data), participants submit **AcceptanceAttestation** signatures. Once all acceptances present/fresh, intent **Ready** for execution. Specifies adapted data structs (buff/sha256), status codes, Clarity interface, lifecycle rules. Uses Clarity sha256 + 32-byte big-endian field serialization (ABI-compatible packing). Reference impl `contracts/erc-8001.clar` (max 20 participants, standard principals).
+ERC-8001 defines a minimal, single-chain primitive for multi-party agent coordination. An initiator posts an intent and each participant provides a verifiable acceptance attestation. Once the required set of acceptances is present and fresh, the intent is executable. The standard specifies typed data, lifecycle, mandatory events, and verification rules compatible with EIP-712, ERC-1271, EIP-2098, and EIP-5267.
 
-# Licence and Copyright
+This SIP ports ERC-8001 faithfully to Stacks/Clarity: sha256 (native), buff structs/principal-hash160, BE32-packing, tx-sender propose (no sig), secp256k1-recover accepts. Max 20 participants (decidable). Reference `contracts/erc-8001.clar`.
 
-This SIP is released under the terms of the **Creative Commons CC0 1.0 Universal** licence:contentReference[oaicite:17]{index=17}. By contributing to this SIP, authors agree to dedicate their work to the public domain. The Stacks Open Internet Foundation holds copyright for this document.
+# Motivation
 
-# Introduction
+Agents in DeFi/MEV/Web3 Gaming and Agentic Commerce often need to act together without a trusted coordinator. Existing intent standards (e.g., ERC-7521, ERC-7683) define single-initiator flows and do not specify multi-party agreement.
 
-As decentralised applications and autonomous agents become more complex, there are many scenarios where a group of independent actors must agree on an action before it is executed. Examples include multi-signature wallet approvals, collaborative trades or arbitrage across DEXs, and MEV (Maximal Extractable Value) mitigation where solvers and bidders coordinate on transaction ordering. In current practice, these often rely on bespoke protocols or off-chain agreements, leading to fragmentation and potential security risks.
+ERC-8001 specifies the smallest on-chain primitive for that gap: an initiator’s EIP-712 intent plus per-participant EIP-712/EIP-1271 acceptances. The intent becomes executable only when the required set of acceptances is present and unexpired. Canonical (sorted-unique) participant lists and standard typed data provide replay safety and wallet compatibility. Privacy, thresholds, bonding, and cross-chain are left to modules.
 
-ERC-8001 [EIP](https://eips.ethereum.org/EIPS/eip-8001) defines minimal single-chain multi-party coordination: initiator EIP-712 AgentIntent + per-participant EIP-712/1271 acceptances. Executable iff all accept & fresh. This SIP ports faithfully to Stacks/Clarity: sha256 (native), buff structs, principal20-hash160 packed, BE32 fields, tx-sender proves propose (no sig), secp256k1-recover for accepts.
+# Specification
 
-The key idea is that an initiator can propose an intent which enumerates all participants who need to agree. Each participant (including the initiator) produces a digital signature (an **acceptance attestation**) to confirm their agreement under certain conditions. These signatures are collected on-chain. If and only if every listed party’s attestation is present and valid within the allowed time window, the intent is marked as ready to execute. This guarantees that the intended action has unanimous approval from the required set of agents, without needing an off-chain coordinator to aggregate trust.
+The keywords “MUST”, “SHOULD”, and “MAY” are to be interpreted as described in RFC 2119 and RFC 8174.
 
-Privacy and advanced policies (like threshold k-of-n approvals, bond posting, or cross-chain intents) are intentionally **out of scope** for this base standard:contentReference[oaicite:20]{index=20}:contentReference[oaicite:21]{index=21}. The goal is to establish a simple, extensible on-chain core that other modules and protocols can build upon for added functionality.
+## Status Codes
+
+Implementations MUST use the canonical enum:
+
+- `None` (u0): default zero state (intent not found)
+- `Proposed` (u1): intent proposed, not all acceptances yet
+- `Ready` (u2): all participants have accepted, intent executable
+- `Executed` (u3): intent successfully executed
+- `Cancelled` (u4): intent explicitly cancelled
+- `Expired` (u5): intent expired before execution
+
+## Overview
+
+SIP ports:
+- Canonical EIP-712 domain for agent coordination
+- Typed data (AgentIntent, CoordinationPayload, AcceptanceAttestation)
+- Deterministic hashing rules (sha256/BE32)
+- Standard interface IAgentCoordination
+- Lifecycle (propose → accept → execute/cancel)
+- Error surface and status codes
+
+## EIP-712 Domain (adapted)
+
+{name: "ERC-8001", version: "1", chainId, verifyingContract=sha256("stacks-sip-erc8001-ref-v1")}
+
+DomainSep = sha256(nameH32 || versionH32 || chainIdBE32 || verifH32)
+
+## Primary Types
+
+**AgentIntent**:
+- payloadHash (buff32): sha256(CoordinationPayload)
+- expiry (uint): unix sec > now at propose
+- nonce (uint): > get-agent-nonce(agent)
+- agentId (principal): proposer tx-sender
+- coordinationType (buff32): e.g. sha256("MEV_SANDWICH_COORD_V1")
+- coordinationValue (uint): informational
+- participants (list 20 principal): unique ascending hash160; inc agent
+
+**CoordinationPayload** (off-chain; opaque):
+- version (buff32)
+- coordinationType (buff32; == AgentIntent)
+- coordinationData (buff)
+- conditionsHash (buff32)
+- timestamp (uint)
+- metadata (buff)
+
+**AcceptanceAttestation**:
+- intentHash (buff32): intentStructHash
+- participant (principal): signer tx-sender
+- nonce (uint): u0 core
+- expiry (uint): >now at accept/execute
+- conditionsHash (buff32)
+- signature (buff65): secp256k1 recid
 
 # Specification
 
@@ -45,88 +97,105 @@ Implementations MUST use the following canonical status codes for each intent’
 
 A compliant contract MUST provide a read-only function (e.g. `get-coordination-status(intentId)`) that returns one of these status codes for a given intent. External tools and UI can use these codes to inform users of the intent’s state.
 
-## Data Structures
+## Typed Data Hashes
 
-**AgentIntent** (fields serialized sha256 for intentHash struct-hash):
+**AGENT_INTENT_TYPEHASH** = sha256("AgentIntent(bytes32 payloadHash,uint64 expiry,uint64 nonce,address agentId,bytes32 coordinationType,uint256 coordinationValue,bytes32 participantsHash)")
 
-- `payloadHash` `(buff 32)`: sha256(CoordinationPayload); checked at execute.
-- `expiry` `uint`: unix sec > now; intent/execute bound.
-- `nonce` `uint`: > get-agent-nonce(agent); replay prot.
-- `agentId` `principal`: proposer=tx-sender.
-- `coordinationType` `(buff 32)`: domain id e.g. sha256("MEV_SANDWICH_COORD_V1").
-- `coordinationValue` `uint`: informational.
-- `participants` `(list 20 principal)`: unique strictly ascending hash160; includes agent.
+**ACCEPTANCE_TYPEHASH** = sha256("AcceptanceAttestation(bytes32 intentHash,address participant,uint64 nonce,uint64 expiry,bytes32 conditionsHash)")
 
-**AcceptanceAttestation** (sig over EIP712-like digest; nonce=0 core):
+participantsHash = sha256(concat(hash160(p) for p in participants))  ;; sorted unique
 
-- `intentHash` `(buff 32)`: intent-struct-hash (not full digest).
-- `participant` `principal`: signer=tx-sender.
-- `nonce` `uint`: u0 (core; modules MAY).
-- `expiry` `uint`: >now at accept/execute.
-- `conditionsHash` `(buff 32)`: participant constraints.
-- `signature` `(buff 65)`: secp256k1 (recid).
+intentStructHash = sha256(TYPEHASH || payloadHash || u64BE32(expiry) || u64BE32(nonce) || addr32(agent) || coordType32 || u256BE32(value) || participantsHash)
 
-Struct-hash: sha256(TYPEHASH32 + fields32BE); domain-sha256(nameH||verH||chain32BE||verifH); digest=sha256(0x1901||domain||struct).
+acceptanceStructHash = sha256(TYPEHASH || intentHash || addr32(participant) || u64BE32(nonce) || u64BE32(expiry) || conditions32)
 
-**CoordinationPayload** (off-chain; sha256=payloadHash; opaque core):
+acceptDigest = sha256(0x1901 || domainSep || acceptanceStructHash)
 
-version `(buff 32)`, coordinationType `(buff 32)`, data `(buff ...)`, conditions `(buff 32)`, timestamp `uint`, metadata `(buff ...)`.
+intentHash = intentStructHash (for acceptance.intentHash)
 
-## Hashing Semantics (SIP adaptation of EIP-712)
+## Interface
 
-- **participantsHash** = `sha256(concat(p.hash160 for p in participants))`
-- **intentStructHash** = `sha256(AGENT_INTENT_TYPEHASH + payloadHash + u64BE32(expiry) + u64BE32(nonce) + addr32(agent) + coordType + u256BE32(value) + participantsHash)`
-- **acceptanceStructHash** = `sha256(ACCEPTANCE_TYPEHASH + intentHash + addr32(participant) + u64BE32(nonce=0) + u64BE32(expiry) + conditions)`
-- **domainSep** = `sha256(nameH + versionH + chainIdBE32 + verifyingFixedH)`
-- **acceptDigest** = `sha256(0x1901 + domainSep + acceptanceStructHash)`
-- TYPEHASH = `sha256("AgentIntent(...)")` / `sha256("AcceptanceAttestation(...)")`
-- `intentHash` = intentStructHash (used in acceptance.intentHash)
+See Standard Contract Interface (above). Matches IAgentCoordination trait.
 
-Off-chain sign acceptDigest; on-chain recover-pubkey(principal-of? == tx-sender).
+Events (print tuples) match EIP exactly.
 
-## Signature Semantics and Domain Separation
+## Semantics
 
-## Standard Contract Interface
+**propose-coordination** MUST revert if:
+- expiry ≤ now
+- nonce ≤ get-agent-nonce(agent)
+- participants not strictly ascending unique (buff21 lex); !contains agent
+- intentHash collision
 
-Compliant contracts expose **exactly** these functions (ref impl `contracts/erc-8001.clar`):
+Stores Proposed (accept-count=0); set agent-nonce; emit Proposed.
 
-```
-(define-public (propose-coordination (payload-hash (buff 32)) (expiry uint) (nonce uint) (coord-type (buff 32)) (coord-value uint) (participants (list 20 principal))) (response (buff 32) uint))
+**accept-coordination** MUST revert if:
+- !exists/expired (now > expiry)
+- status != PROPOSED
+- !participant / already accepted
+- accept-expiry ≤ now
+- sig invalid (recover principal != tx-sender)
 
-(define-public (accept-coordination (intent-hash (buff 32)) (accept-expiry uint) (conditions (buff 32)) (sig (buff 65))) (response bool uint))
+Store acceptance; ++count; READY if full; emit Accepted; return all-accepted?
 
-(define-public (execute-coordination (intent-hash (buff 32)) (payload (buff 1024)) (execution-data (buff 1024))) (response bool (buff 1024)))
+**execute-coordination** MUST revert if:
+- status != READY
+- now > expiry
+- any accept-expiry < now
+- sha256(payload) != payloadHash
 
-(define-public (cancel-coordination (intent-hash (buff 32)) (reason (string-ascii 34))) (response bool uint))
+Set Executed; emit Executed (success=true, result=0x{}); return (true 0x{}).
 
-(define-read-only (get-coordination-status (intent-hash (buff 32))) (response {status: uint, agent: principal, participants: (list 20 principal), accepted-by: (list 20 principal), expiry: uint} uint))
+**cancel-coordination** MUST revert if:
+- !exists
+- status EXECUTED/CANCELLED
+- !(agent==tx-sender or now>expiry)
 
-(define-read-only (get-required-acceptances (intent-hash (buff 32))) (response uint uint))
+Set Cancelled; emit Cancelled.
 
-(define-read-only (get-agent-nonce (agent principal)) uint)
-```
+**get-coordination-status**: None/err if !exists; auto EXPIRED if now>expiry & !EXEC/CANC; return {status,effective,agent,participants,accepted-by,expiry}
 
-**Errors** (u100+ canonical, revert w/ `asserts!` / `err`):
+Nonces: monotonic per-agent intents; accept nonce=u0 core.
 
-| Code | Error |
-|------|-------|
+## Errors
+
+Canonical u100+ (ref impl):
+
 | u100 | Unauthorized |
 | u101 | NotFound |
 | u102 | InvalidState |
 | u103 | InvalidSig |
 | u104 | NotParticipant |
 | u105 | AlreadyAccepted |
-| u106 | Expired (intent) |
+| u106 | ExpiredIntent |
 | u107 | NonceTooLow |
-| u108 | InvalidParticipants (unsorted/dups/missing-agent/collision/max20) |
-| u109 | AcceptExpired |
+| u108 | InvalidParticipants |
+| u109 | ExpiredAcceptance |
 | u110 | PayloadHashMismatch |
 
-Events: `print` tuples match EIP-8001 exactly.
+# Rationale
 
-Semantics: **MUST** match EIP-8001 (reverts, lifecycle, checks); see [EIP](https://eips.ethereum.org/EIPS/eip-8001).
+Sorted participant lists remove hash malleability and allow off-chain deduplication. Separation of intent and acceptance allows off-chain collation and a single on-chain check. Keeping ERC-8001 single-chain avoids coupling to bridge semantics and keeps the primitive audit-friendly. Wallet friendliness: EIP-712 arrays let signers see actual participant addresses.
 
-By following these semantics, any signature collected under this standard is tightly bound to the specific intent and contract, mitigating replay attacks across contexts.
+# Backwards Compatibility
+
+ERC-8001 introduces a new interface. It is compatible with EOA and contract wallets via ECDSA and ERC-1271. It does not modify existing standards. SIP adds no breaking changes to Stacks.
+
+# Security Considerations
+
+**Replay**: Domain binding + monotonic nonces prevent cross-contract replay.
+
+**Malleability**: secp256k1-recover? handles low-S/65b.
+
+**Equivocation**: Participant may sign conflicts; mitigate w/ modules (slashing/reputation).
+
+**Liveness**: TTL on intent/accepts; executors ensure time buffer.
+
+**MEV**: If coordinationData reveals strategy, use Privacy module (commit-reveal/encryption).
+
+# Copyright
+
+Copyright and related rights waived via CC0.
 
 ## Standard Contract Interface (Clarity)
 
