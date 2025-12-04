@@ -106,22 +106,23 @@ function mineToExpiry() {
 ## Read-only Functions
 
 ### get-coordination-status
+- [x] PROPOSED: {status:1, ..., accepted-by:[]}
+- [x] CANCELLED: {status:4}
 - [ ] Not found → err ERR_NOT_FOUND
-- [ ] PROPOSED: {status:1, ..., accepted-by:[]}
 - [ ] READY: {status:2, accepted-by: all}
 - [ ] EXECUTED: {status:3}
-- [ ] CANCELLED: {status:4}
 - [ ] Effective EXPIRED (stored PROPOSED/READY + now > expiry) → status=5
 - [ ] accepted-by: correct filtered list (order preserved)
 
 ### get-required-acceptances
-- [ ] Returns len(participants) or err not found
+- [x] Returns len(participants) 
+- [x] err not found
 
 ### get-agent-nonce
-- [ ] Initial 0; updates post-propose
+- [x] Initial 0; updates post-propose
 
 ### get-eip712-constants
-- [ ] Returns full struct (domain, types, etc.)
+- [x] Returns full struct (domain, types, etc.)
 
 ## Integration Flows
 
