@@ -6,26 +6,26 @@
 ;; Usage ex: Propose w/ sorted participants (inc agent), off-chain sign accept-digest (nonce=0), execute w/ payload.
 ;; Test outline: Clarinet (propose/acceptN/ready/execute; cancel/expire edge; invalid sig/sort/nonce/expiry).
 
-(define-trait IAgentCoordination
-  (
+;; (define-trait IAgentCoordination
+;;   (
     ;; Propose (tx-sender=agent; no sig; returns intentHash)
-    (propose-coordination (buff 32) uint uint (buff 32) uint (list 20 principal)) (response (buff 32) uint)
+;;     (propose-coordination (buff 32) uint uint (buff 32) uint (list 20 principal)) (response (buff 32) uint)
     ;; Accept (tx-sender=participant; sig over acceptance-digest; returns all-accepted?)
-    (accept-coordination (buff 32) uint (buff 32) (buff 65)) (response bool uint)
+;;     (accept-coordination (buff 32) uint (buff 32) (buff 65)) (response bool uint)
     ;; Execute (any; verify payload/sha256==payloadHash/all-fresh; returns (success result); state Executed)
-    (execute-coordination (buff 32) (buff 1024) (buff 1024)) (response bool (buff 1024))
+;;     (execute-coordination (buff 32) (buff 1024) (buff 1024)) (response bool (buff 1024))
     ;; Cancel (agent pre-expiry/any post; reason opt; state Cancelled)
-    (cancel-coordination (buff 32) (string-ascii 34)) (response bool uint)
+;;     (cancel-coordination (buff 32) (string-ascii 34)) (response bool uint)
     ;; Status (effective inc auto-Expired; accepted-by list)
-    (get-coordination-status (buff 32)) (response
-      {status: uint, agent: principal, participants: (list 20 principal), accepted-by: (list 20 principal), expiry: uint}
-      uint)
+ ;;    (get-coordination-status (buff 32)) (response
+ ;;      {status: uint, agent: principal, participants: (list 20 principal), accepted-by: (list 20 principal), expiry: uint}
+ ;;      uint)
     ;; Required = len(participants)
-    (get-required-acceptances (buff 32)) (response uint uint)
+;;     (get-required-acceptances (buff 32)) (response uint uint)
     ;; Nonce (latest used)
-    (get-agent-nonce (principal)) uint
-  )
-)
+;;     (get-agent-nonce (principal)) uint
+;;   )
+;; )
 
 (define-constant NONE u0)
 (define-constant PROPOSED u1)
@@ -206,7 +206,7 @@
 )
 
 (define-constant VERIFYING_CONTRACT_HASH
-  (sha256 (string-ascii "stacks-sip-erc8001-ref-v1"))
+  (sha256 "stacks-sip-erc8001-ref-v1")
 )
 
 ;; Private: buff20 -> buff32 pad-right 0x00 (EIP address equiv)
@@ -218,7 +218,7 @@
 (define-private (get-domain-separator)
   (let
     (
-      (chain32 (buff32FromUint64 (chain-id)))
+      (chain32 (buff32FromUint64 chain-id))
     )
     (sha256
       (concat DOMAIN_NAME_HASH
@@ -322,7 +322,7 @@
   (let
     (
       (agent tx-sender)
-      (now (stacks-block-time))
+      (now stacks-block-time)
     )
     (asserts! (> expiry now) ERR_EXPIRED)
     (let
@@ -370,11 +370,11 @@
 (define-public (accept-coordination (intent-hash (buff 32)) (accept-expiry uint) (conditions (buff 32)) (sig (buff 65)))
   (let
     (
-      (now (stacks-block-time))
+      (now stacks-block-time)
       (caller tx-sender)
       (intent-opt (map-get? intents {intent-hash: intent-hash}))
     )
-    (asserts! (some? intent-opt) ERR_NOT_FOUND)
+    (asserts! (is-some intent-opt) ERR_NOT_FOUND)
     (let
       (
         (intent (unwrap! intent-opt ERR_NOT_FOUND))
@@ -452,10 +452,10 @@
 (define-public (execute-coordination (intent-hash (buff 32)) (payload (buff 1024)) (execution-data (buff 1024)))
   (let
     (
-      (now (stacks-block-time))
+      (now stacks-block-time)
       (intent-opt (map-get? intents {intent-hash: intent-hash}))
     )
-    (asserts! (some? intent-opt) ERR_NOT_FOUND)
+    (asserts! (is-some intent-opt) ERR_NOT_FOUND)
     (let
       (
         (intent (unwrap! intent-opt ERR_NOT_FOUND))
@@ -487,10 +487,10 @@
 (define-public (cancel-coordination (intent-hash (buff 32)) (reason (string-ascii 34)))
   (let
     (
-      (now (stacks-block-time))
+      (now stacks-block-time)
       (intent-opt (map-get? intents {intent-hash: intent-hash}))
     )
-    (asserts! (some? intent-opt) ERR_NOT_FOUND)
+    (asserts! (is-some intent-opt) ERR_NOT_FOUND)
     (let
       (
         (intent (unwrap! intent-opt ERR_NOT_FOUND))
@@ -531,7 +531,7 @@
   (let
     (
       (intent-opt (map-get? intents {intent-hash: intent-hash}))
-      (now (stacks-block-time))
+      (now stacks-block-time)
     )
     (match intent-opt
       intent
