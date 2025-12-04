@@ -199,14 +199,14 @@
 (define-private (u64->buff32-be (n uint))
   (let
     (
-      (b7 (& (>> n u56) u255))
-      (b6 (& (>> n u48) u255))
-      (b5 (& (>> n u40) u255))
-      (b4 (& (>> n u32) u255))
-      (b3 (& (>> n u24) u255))
-      (b2 (& (>> n u16) u255))
-      (b1 (& (>> n u8) u255))
-      (b0 (& n u255))
+      (b7 (bit-and (bit-shift-right n u56) u255))
+      (b6 (bit-and (bit-shift-right n u48) u255))
+      (b5 (bit-and (bit-shift-right n u40) u255))
+      (b4 (bit-and (bit-shift-right n u32) u255))
+      (b3 (bit-and (bit-shift-right n u24) u255))
+      (b2 (bit-and (bit-shift-right n u16) u255))
+      (b1 (bit-and (bit-shift-right n u8)  u255))
+      (b0 (bit-and n u255))
       (bytes8be
         (concat
           (buff-from-uint8 b7)
