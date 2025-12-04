@@ -34,6 +34,9 @@ const FUTURE_EXPIRY = uintCV(2000000000n);
 const NONCE_1 = uintCV(1n);
 const NONCE_0 = uintCV(0n);
 const COORD_VALUE = uintCV(100n);
+const PAST_EXPIRY = uintCV(1n);
+const FUTURE_ACCEPT_EXPIRY = uintCV(2000000001n);
+const CONDITIONS = ZERO_32;
 
 /*
   The test below is an example. To learn more, read the testing documentation here:
@@ -143,23 +146,22 @@ describe(`read-only functions: ${CONTRACT}`, () => {
     const statusTuple = getStatusTuple(statusResult);
     expectStatusProposed(statusTuple, FUTURE_EXPIRY);
   });
+
+  it("get-coordination-status fails for not found (ERR_NOT_FOUND)", () => {
+    const badHash = bufferCV(new Uint8Array(32).fill(255));
+    const result = simnet.callReadOnlyFn(
+      CONTRACT,
+      "get-coordination-status",
+      [badHash],
+      deployer
+    );
+    expect(result.result).toBeErr(101n);
+  });
 });
 
   it("fails to propose coordination with nonce 0 (ERR_NONCE_TOO_LOW)", () => {
-    const deployer = accounts.get("deployer")!;
-    const zero32 = bufferCV(new Uint8Array(32));
-    const futureExpiry = uintCV(2000000000n);
-    const nonce0 = uintCV(0n);
-    const coordType = zero32;
-    const coordValue = uintCV(100n);
-    const participants = listCV([principalCV(deployer)]);
-    const { result } = simnet.callPublicFn(
-      "erc-8001",
-      "propose-coordination",
-      [zero32, futureExpiry, nonce0, coordType, coordValue, participants],
-      deployer
-    );
-    expect(result).toBeErr(107n);
+    const receipt = propose(deployer, SINGLE_PARTICIPANTS, NONCE_0);
+    expect(receipt.result).toBeErr(107n);
   });
 
   it("proposes coordination successfully with nonce 1", () => {
@@ -293,6 +295,52 @@ describe(`read-only functions: ${CONTRACT}`, () => {
 
     // assert
     expect(receiptCancel2.result).toBeErr(102n);
+  });
+
+  it("accept-coordination() fails if intent not found (ERR_NOT_FOUND)", () => {
+    const badHash = bufferCV(new Uint8Array(32).fill(255));
+    const dummySig = bufferCV(new Uint8Array(65));
+    const receipt = simnet.callPublicFn(
+      CONTRACT,
+      "accept-coordination",
+      [badHash, FUTURE_ACCEPT_EXPIRY, CONDITIONS, dummySig],
+      deployer
+    );
+    expect(receipt.result).toBeErr(101n);
+  });
+
+  it("accept-coordination() fails if caller not participant (ERR_NOT_PARTICIPANT)", () => {
+    // arrange: propose with single participant (deployer only)
+    const receiptPropose = propose(deployer, SINGLE_PARTICIPANTS);
+    expect(receiptPropose.result).toBeOk();
+    const intentHash = receiptPropose.result.value as BufferCV;
+
+    // act: wallet1 tries to accept (not participant)
+    const dummySig = bufferCV(new Uint8Array(65));
+    const receipt = simnet.callPublicFn(
+      CONTRACT,
+      "accept-coordination",
+      [intentHash, FUTURE_ACCEPT_EXPIRY, CONDITIONS, dummySig],
+      wallet1
+    );
+    expect(receipt.result).toBeErr(104n);
+  });
+
+  it("accept-coordination() fails if accept-expiry expired (ERR_ACCEPT_EXPIRED)", () => {
+    // arrange: propose
+    const receiptPropose = propose(deployer, SINGLE_PARTICIPANTS);
+    expect(receiptPropose.result).toBeOk();
+    const intentHash = receiptPropose.result.value as BufferCV;
+
+    // act: accept with past expiry
+    const dummySig = bufferCV(new Uint8Array(65));
+    const receipt = simnet.callPublicFn(
+      CONTRACT,
+      "accept-coordination",
+      [intentHash, PAST_EXPIRY, CONDITIONS, dummySig],
+      deployer
+    );
+    expect(receipt.result).toBeErr(109n);
   });
 });
 });

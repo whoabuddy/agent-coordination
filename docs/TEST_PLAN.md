@@ -71,18 +71,18 @@ function mineToExpiry() {
 
 ## Public Functions: accept-coordination
 
-- [ ] Fail: intent not found → ERR_NOT_FOUND (101)
+- [x] Fail: intent not found → ERR_NOT_FOUND (101)
 - [ ] Fail: intent expired → ERR_EXPIRED (106)
 - [ ] Fail: not PROPOSED → ERR_INVALID_STATE (102)
-- [ ] Fail: caller not participant → ERR_NOT_PARTICIPANT (104)
+- [x] Fail: caller not participant → ERR_NOT_PARTICIPANT (104)
 - [ ] Fail: already accepted → ERR_ALREADY_ACCEPTED (105)
-- [ ] Fail: accept-expiry < now → ERR_ACCEPT_EXPIRED (109)
+- [x] Fail: accept-expiry < now → ERR_ACCEPT_EXPIRED (109)
 - [ ] Fail: invalid sig → ERR_INVALID_SIG (103)
 - [ ] Fail: sig recovers wrong principal → ERR_INVALID_SIG (103)
 - [ ] Success: single participant → ok(true), status=READY, accept-count=1
 - [ ] Success: partial (e.g., 2/3) → ok(false), status=PROPOSED, count=2
 - [ ] Success: all N → ok(true), status=READY
-- [ ] Print: "CoordinationAccepted" {..., accepted-count, required-count}
+- [ ] Event: "erc-8001/coordination-accepted" {..., accepted-count, required-count}
 
 ## Public Functions: execute-coordination
 
@@ -108,7 +108,7 @@ function mineToExpiry() {
 ### get-coordination-status
 - [x] PROPOSED: {status:1, ..., accepted-by:[]}
 - [x] CANCELLED: {status:4}
-- [ ] Not found → err ERR_NOT_FOUND
+- [x] Not found → err ERR_NOT_FOUND
 - [ ] READY: {status:2, accepted-by: all}
 - [ ] EXECUTED: {status:3}
 - [ ] Effective EXPIRED (stored PROPOSED/READY + now > expiry) → status=5
