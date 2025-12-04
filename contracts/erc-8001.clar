@@ -193,15 +193,7 @@
 
 (define-constant SIG_PREFIX (concat 0x19 0x01))
 
-(define-constant PAD_ZERO_12
-  (fold concat
-    (list
-      0x00 0x00 0x00 0x00 0x00 0x00
-      0x00 0x00 0x00 0x00 0x00 0x00
-    )
-    0x
-  )
-)
+(define-constant PAD_ZERO_12 0x000000000000000000000000)
 
 
 ;; Private: uint -> buff32 Stacks-ABI encode (sha256(uint) canonical LE u128 bytes; match off-chain)
