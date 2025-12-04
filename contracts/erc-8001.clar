@@ -485,3 +485,32 @@
   )
 )
 
+;; Public: cancel coordination (EIP cancelCoordination; proposer pre-expiry or any post-expiry)
+(define-public (cancel-coordination (intent-hash (buff 32)) (reason (string-ascii 34)))
+  (let
+    (
+      (now (stacks-block-time))
+      (intent-opt (map-get? intents {intent-hash: intent-hash}))
+    )
+    (asserts! (some? intent-opt) ERR_NOT_FOUND)
+    (let
+      (
+        (intent (unwrap! intent-opt ERR_NOT_FOUND))
+        (agent (get agent intent))
+      )
+      (asserts! (not (is-eq (get status intent) EXECUTED)) ERR_INVALID_STATE)
+      (asserts! (not (is-eq (get status intent) CANCELLED)) ERR_INVALID_STATE)
+      (asserts! (or (is-eq tx-sender agent) (> now (get expiry intent))) ERR_UNAUTHORIZED)
+      (try! (map-set intents {intent-hash: intent-hash} (merge intent {status: CANCELLED})))
+      (print {
+        event: "CoordinationCancelled",
+        intent-hash: intent-hash,
+        canceller: tx-sender,
+        reason: reason,
+        finalStatus: CANCELLED
+      })
+      (ok true)
+    )
+  )
+)
+
