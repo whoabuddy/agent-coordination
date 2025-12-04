@@ -70,7 +70,7 @@
 )
 
 ;; Private: principal -> buff21 (v1 + hash160(20b); panics invalid/contract?)
-(define-private (principal->buff21 (p principal))
+(define-private (principal-buff21 (p principal))
     (let ((destruct (unwrap-panic (principal-destruct? p))))
         (concat (get version destruct) (get hash-bytes destruct))
     )
@@ -143,8 +143,8 @@
             (let (
                 (curr (unwrap-panic (element-at? curr-plist i)))
                 (next (unwrap-panic (element-at? curr-plist (+ i u1))))
-                (curr-b (principal->buff21 curr))
-                (next-b (principal->buff21 next))
+                (curr-b (principal-buff21 curr))
+                (next-b (principal-buff21 next))
               )
               {sorted: (and curr-sorted (buff21-lt? curr-b next-b)), plist: curr-plist, n: curr-n}
             )
@@ -172,36 +172,32 @@
 )
 
 ;; Chunk 2: EIP-712 hash helpers (sha256 adapted; LE uint serial via buff-from-uinteger pad-left0)
-(define-constant DOMAIN_NAME_STR (string-ascii "ERC-8001"))
-(define-constant DOMAIN_VERSION_STR (string-ascii "1"))
+(define-constant DOMAIN_NAME_STR "ERC-8001")
+(define-constant DOMAIN_VERSION_STR "1")
 (define-constant DOMAIN_NAME_HASH (sha256 DOMAIN_NAME_STR))
 (define-constant DOMAIN_VERSION_HASH (sha256 DOMAIN_VERSION_STR))
 
 (define-constant AGENT_INTENT_TYPE_STR
-  (string-ascii
-    "AgentIntent(bytes32 payloadHash,uint64 expiry,uint64 nonce,address agentId,bytes32 coordinationType,uint256 coordinationValue,bytes32 participantsHash)"
-  )
+  "AgentIntent(bytes32 payloadHash,uint64 expiry,uint64 nonce,address agentId,bytes32 coordinationType,uint256 coordinationValue,bytes32 participantsHash)"
 )
 (define-constant AGENT_INTENT_TYPEHASH (sha256 AGENT_INTENT_TYPE_STR))
 
 (define-constant ACCEPTANCE_TYPE_STR
-  (string-ascii
-    "AcceptanceAttestation(bytes32 intentHash,address participant,uint64 nonce,uint64 expiry,bytes32 conditionsHash)"
-  )
+  "AcceptanceAttestation(bytes32 intentHash,address participant,uint64 nonce,uint64 expiry,bytes32 conditionsHash)"
 )
 (define-constant ACCEPTANCE_TYPEHASH (sha256 ACCEPTANCE_TYPE_STR))
 
-(define-constant SIG_PREFIX (concat (buff 1 0x19) (buff 1 0x01)))
+(define-constant SIG_PREFIX (concat 0x19 0x01))
 
 (define-constant PAD_ZERO_12
-  (buff 12
+  (list
     0x00 0x00 0x00 0x00 0x00 0x00
     0x00 0x00 0x00 0x00 0x00 0x00
   )
 )
 
 (define-constant PAD_ZERO_24
-  (buff 24
+  (list
     0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x00
     0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x00
     0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x00
