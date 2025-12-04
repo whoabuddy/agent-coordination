@@ -231,7 +231,7 @@
 (define-private (participants-to-hash (participants (list 20 principal)))
   (sha256
     (fold
-      concat
+      (lambda (h accum) (concat accum h))
       (map principal-hash160 participants)
       0x
     )
