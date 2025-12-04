@@ -196,7 +196,7 @@
 )
 
 ;; Private: uint (<=2^64-1) -> buff32 big-endian pad-left 0x00 (ABI encode equiv)
-(define-private (u64->buff32-be (n uint))
+(define-private (u64-to-buff32-be (n uint))
   (let
     (
       (b7 (bit-and (bit-shift-right n u56) u255))
@@ -241,7 +241,7 @@
 (define-private (get-domain-separator)
   (let
     (
-      (chain32 (u64->buff32-be (chain-id)))
+      (chain32 (u64-to-buff32-be (chain-id)))
     )
     (sha256
       (concat DOMAIN_NAME_HASH
@@ -259,7 +259,7 @@
     (fold
       concat
       (map principal-hash160 participants)
-      0x{}
+      0x
     )
   )
 )
@@ -278,14 +278,14 @@
     (concat AGENT_INTENT_TYPEHASH
       (concat payload-hash
         (concat
-          (u64->buff32-be expiry)
+          (u64-to-buff32-be expiry)
           (concat
-            (u64->buff32-be nonce)
+            (u64-to-buff32-be nonce)
             (concat
               (address-to-buff32 agent)
               (concat coord-type
                 (concat
-                  (u64->buff32-be coord-value)
+                  (u64-to-buff32-be coord-value)
                   part-hash
                 )
               )
@@ -311,9 +311,9 @@
         (concat
           (address-to-buff32 participant)
           (concat
-            (u64->buff32-be accept-nonce)
+            (u64-to-buff32-be accept-nonce)
             (concat
-              (u64->buff32-be accept-expiry)
+              (u64-to-buff32-be accept-expiry)
               conditions
             )
           )
@@ -499,9 +499,9 @@
           executor: tx-sender,
           success: true,
           gasUsed: u0,
-          result: 0x{}
+          result: 0x
         })
-        (ok true 0x{})
+        (ok true 0x)
       )
     )
   )
