@@ -528,6 +528,10 @@
   )
 )
 
+;; Private: get accepted-by list for coordination status
+(define-read-only (get-accepted-by (intent-hash (buff 32)) (participants (list 20 principal)))
+  (get accepted (fold accepted-filter-step participants {accepted: (unwrap-panic (slice? participants u0 u0)), intent-hash: intent-hash})))
+
 ;; Read-only: full coordination status (EIP getCoordinationStatus; auto-Expires if applicable)
 (define-read-only (get-coordination-status (intent-hash (buff 32)))
   (let
@@ -547,11 +551,7 @@
               (if (> now expiry) EXPIRED stored-status)
             )
           )
-          (accepted-by
-            (get accepted (fold accepted-filter-step (get participants intent) 
-              {accepted: (unwrap-panic (as-max-len? (list) u20)), intent-hash: intent-hash}
-            ))
-          )
+          (accepted-by (get-accepted-by intent-hash (get participants intent)))
         )
         (ok
           {
