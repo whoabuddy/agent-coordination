@@ -196,7 +196,7 @@
 )
 
 ;; Private: uint (<=2^64-1) -> buff32 big-endian pad-left 0x00 (ABI encode equiv)
-(define-private (u64-to-buff32-be (n uint))
+(define-private (buff32FromUint64 (n uint))
   (let
     (
       (b7 (bit-and (bit-shift-right n u56) u255))
@@ -241,7 +241,7 @@
 (define-private (get-domain-separator)
   (let
     (
-      (chain32 (u64-to-buff32-be (chain-id)))
+      (chain32 (buff32FromUint64 (chain-id)))
     )
     (sha256
       (concat DOMAIN_NAME_HASH
@@ -278,14 +278,14 @@
     (concat AGENT_INTENT_TYPEHASH
       (concat payload-hash
         (concat
-          (u64-to-buff32-be expiry)
+          (buff32FromUint64 expiry)
           (concat
-            (u64-to-buff32-be nonce)
+            (buff32FromUint64 nonce)
             (concat
               (address-to-buff32 agent)
               (concat coord-type
                 (concat
-                  (u64-to-buff32-be coord-value)
+                  (buff32FromUint64 coord-value)
                   part-hash
                 )
               )
@@ -311,9 +311,9 @@
         (concat
           (address-to-buff32 participant)
           (concat
-            (u64-to-buff32-be accept-nonce)
+            (buff32FromUint64 accept-nonce)
             (concat
-              (u64-to-buff32-be accept-expiry)
+              (buff32FromUint64 accept-expiry)
               conditions
             )
           )
