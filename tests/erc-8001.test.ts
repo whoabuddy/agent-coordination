@@ -83,4 +83,74 @@ describe("ERC-8001 tests", () => {
     );
     expect(nonceResult).toBeUint(1n);
   });
+
+  it("fails to propose coordination with past expiry (ERR_EXPIRED)", () => {
+    const deployer = accounts.get("deployer")!;
+    const zero32 = bufferCV(new Uint8Array(32));
+    const pastExpiry = uintCV(1n);
+    const nonce2 = uintCV(2n);
+    const coordType = zero32;
+    const coordValue = uintCV(100n);
+    const participants = listCV([principalCV(deployer)]);
+    const { result } = simnet.callPublicFn(
+      "erc-8001",
+      "propose-coordination",
+      [zero32, pastExpiry, nonce2, coordType, coordValue, participants],
+      deployer
+    );
+    expect(result).toBeErr(106n);
+  });
+
+  it("fails to propose coordination missing agent in participants (ERR_INVALID_PARTICIPANTS)", () => {
+    const deployer = accounts.get("deployer")!;
+    const wallet1 = accounts.get("wallet_1")!;
+    const zero32 = bufferCV(new Uint8Array(32));
+    const futureExpiry = uintCV(2000000000n);
+    const nonce2 = uintCV(2n);
+    const coordType = zero32;
+    const coordValue = uintCV(100n);
+    const participants = listCV([principalCV(wallet1)]);
+    const { result } = simnet.callPublicFn(
+      "erc-8001",
+      "propose-coordination",
+      [zero32, futureExpiry, nonce2, coordType, coordValue, participants],
+      deployer
+    );
+    expect(result).toBeErr(108n);
+  });
+
+  it("fails to propose coordination with duplicate participants (ERR_INVALID_PARTICIPANTS)", () => {
+    const deployer = accounts.get("deployer")!;
+    const zero32 = bufferCV(new Uint8Array(32));
+    const futureExpiry = uintCV(2000000000n);
+    const nonce2 = uintCV(2n);
+    const coordType = zero32;
+    const coordValue = uintCV(100n);
+    const participants = listCV([principalCV(deployer), principalCV(deployer)]);
+    const { result } = simnet.callPublicFn(
+      "erc-8001",
+      "propose-coordination",
+      [zero32, futureExpiry, nonce2, coordType, coordValue, participants],
+      deployer
+    );
+    expect(result).toBeErr(108n);
+  });
+
+  it("fails to propose coordination with unsorted participants (ERR_INVALID_PARTICIPANTS)", () => {
+    const deployer = accounts.get("deployer")!;
+    const wallet1 = accounts.get("wallet_1")!;
+    const zero32 = bufferCV(new Uint8Array(32));
+    const futureExpiry = uintCV(2000000000n);
+    const nonce2 = uintCV(2n);
+    const coordType = zero32;
+    const coordValue = uintCV(100n);
+    const participants = listCV([principalCV(wallet1), principalCV(deployer)]);
+    const { result } = simnet.callPublicFn(
+      "erc-8001",
+      "propose-coordination",
+      [zero32, futureExpiry, nonce2, coordType, coordValue, participants],
+      deployer
+    );
+    expect(result).toBeErr(108n);
+  });
 });
