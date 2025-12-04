@@ -134,3 +134,141 @@
     )
 )
 
+;; Chunk 2: EIP-712 hash helpers (sha256 adapted; LE uint serial via buff-from-uinteger pad-left0)
+(define-constant DOMAIN_NAME_STR (string-ascii "ERC-8001"))
+(define-constant DOMAIN_VERSION_STR (string-ascii "1"))
+(define-constant DOMAIN_NAME_HASH (sha256 DOMAIN_NAME_STR))
+(define-constant DOMAIN_VERSION_HASH (sha256 DOMAIN_VERSION_STR))
+
+(define-constant AGENT_INTENT_TYPE_STR
+  (string-ascii
+    "AgentIntent(bytes32 payloadHash,uint64 expiry,uint64 nonce,address agentId,bytes32 coordinationType,uint256 coordinationValue,bytes32 participantsHash)"
+  )
+)
+(define-constant AGENT_INTENT_TYPEHASH (sha256 AGENT_INTENT_TYPE_STR))
+
+(define-constant ACCEPTANCE_TYPE_STR
+  (string-ascii
+    "AcceptanceAttestation(bytes32 intentHash,address participant,uint64 nonce,uint64 expiry,bytes32 conditionsHash)"
+  )
+)
+(define-constant ACCEPTANCE_TYPEHASH (sha256 ACCEPTANCE_TYPE_STR))
+
+(define-constant SIG_PREFIX (concat (buff 1 0x19) (buff 1 0x01)))
+
+(define-constant PAD_ZERO_12
+  (buff 12
+    0x00 0x00 0x00 0x00 0x00 0x00
+    0x00 0x00 0x00 0x00 0x00 0x00
+  )
+)
+
+;; Private: buff20 -> buff32 pad-right 0x00 (EIP address equiv)
+(define-private (address-to-buff32 (p principal))
+  (concat (principal-hash160 p) PAD_ZERO_12)
+)
+
+;; Private: domain separator (sha256(nameH32 + versionH32 + chainId32LE + verifyingContract32))
+(define-private (get-domain-separator)
+  (let
+    (
+      (chain32 (buff-from-uinteger (chain-id) u32))
+      (verifying32 (address-to-buff32 contract-caller))
+    )
+    (sha256
+      (concat DOMAIN_NAME_HASH
+        (concat DOMAIN_VERSION_HASH
+          (concat chain32 verifying32)
+        )
+      )
+    )
+  )
+)
+
+;; Private: participants hash = sha256(concat(p1.hash160 || p2.hash160 || ...)) (EIP equiv)
+(define-private (participants-to-hash (participants (list 20 principal)))
+  (sha256
+    (fold
+      concat
+      (map principal-hash160 participants)
+      0x{}
+    )
+  )
+)
+
+;; Private: agent intent struct hash (sha256(typeH || fields serialized))
+(define-private (intent-struct-hash
+    (payload-hash (buff 32))
+    (expiry uint)
+    (nonce uint)
+    (agent principal)
+    (coord-type (buff 32))
+    (coord-value uint)
+    (part-hash (buff 32))
+  )
+  (sha256
+    (concat AGENT_INTENT_TYPEHASH
+      (concat payload-hash
+        (concat
+          (buff-from-uinteger expiry u8)
+          (concat
+            (buff-from-uinteger nonce u8)
+            (concat
+              (address-to-buff32 agent)
+              (concat coord-type
+                (concat
+                  (buff-from-uinteger coord-value u32)
+                  part-hash
+                )
+              )
+            )
+          )
+        )
+      )
+    )
+  )
+)
+
+;; Private: acceptance struct hash (sha256(typeH || intentH32 || part32 || nonce8 || expiry8 || cond32))
+(define-private (acceptance-struct-hash
+    (intent-hash (buff 32))
+    (participant principal)
+    (accept-nonce uint)
+    (accept-expiry uint)
+    (conditions (buff 32))
+  )
+  (sha256
+    (concat ACCEPTANCE_TYPEHASH
+      (concat intent-hash
+        (concat
+          (address-to-buff32 participant)
+          (concat
+            (buff-from-uinteger accept-nonce u8)
+            (concat
+              (buff-from-uinteger accept-expiry u8)
+              conditions
+            )
+          )
+        )
+      )
+    )
+  )
+)
+
+;; Private: full acceptance EIP-712 digest for sig (sha256(1901 || domainSep || structH))
+(define-private (acceptance-digest
+    (intent-hash (buff 32))
+    (participant principal)
+    (accept-nonce uint)
+    (accept-expiry uint)
+    (conditions (buff 32))
+  )
+  (let
+    (
+      (domain-sep (get-domain-separator))
+      (struct-h (acceptance-struct-hash intent-hash participant accept-nonce accept-expiry conditions))
+    )
+    (sha256 (concat SIG_PREFIX (concat domain-sep struct-h)))
+  )
+)
+
