@@ -22,6 +22,7 @@
 (define-constant ERR_NONCE_TOO_LOW u107)
 (define-constant ERR_INVALID_PARTICIPANTS u108)
 (define-constant ERR_ACCEPT_EXPIRED u109)
+(define-constant ERR_PAYLOAD_HASH_MISMATCH u110)
 
 ;; Storage
 (define-map intents 
@@ -423,6 +424,62 @@
             )
           )
         )
+      )
+    )
+  )
+)
+
+;; Private: check all participants' acceptances are non-expired (assumes all accepted via count==len)
+(define-private (all-acceptances-fresh? (intent-hash (buff 32)) (participants (list 20 principal)) (now uint))
+  (fold
+    (lambda (p fresh)
+      (if (not fresh)
+        false
+        (let (
+          (acc-opt (map-get? acceptances {intent-hash: intent-hash, participant: p}))
+        )
+          (match acc-opt
+            acc (and (>= (get accept-expiry acc) now) true)
+            false  ;; missing acceptance
+          )
+        )
+      )
+    )
+    participants
+    true
+  )
+)
+
+;; Public: execute ready coordination (EIP executeCoordination; any caller, verify payload, state to Executed)
+(define-public (execute-coordination (intent-hash (buff 32)) (payload (buff 1024)) (execution-data (buff 1024)))
+  (let
+    (
+      (now (stacks-block-time))
+      (intent-opt (map-get? intents {intent-hash: intent-hash}))
+    )
+    (asserts! (some? intent-opt) ERR_NOT_FOUND)
+    (let
+      (
+        (intent (unwrap! intent-opt ERR_NOT_FOUND))
+      )
+      (asserts! (is-eq (get status intent) READY) ERR_INVALID_STATE)
+      (asserts! (<= now (get expiry intent)) ERR_EXPIRED)
+      (asserts! (all-acceptances-fresh? intent-hash (get participants intent) now) ERR_ACCEPT_EXPIRED)
+      (asserts! (is-eq (sha256 payload) (get payload-hash intent)) ERR_PAYLOAD_HASH_MISMATCH)
+      (let
+        (
+          (new-intent (merge intent {status: EXECUTED}))
+        )
+        (try! (map-set intents {intent-hash: intent-hash} new-intent))
+        (print {
+          event: "CoordinationExecuted",
+          intent-hash: intent-hash,
+          executor: tx-sender,
+          success: true,
+          gasUsed: u0,
+          result: 0x{}
+        })
+        (ok true 0x{})
       )
     )
   )
