@@ -82,80 +82,91 @@
 )
 
 ;; Private: plist contains? p (fold O(n))
+(define-private (contains-fold-step (elem principal) (accum {found: bool, target: principal}))
+  {found: (or (get found accum) (is-eq elem (get target accum))), target: (get target accum)}
+)
+
 (define-private (contains-principal? (plist (list 20 principal)) (p principal))
-    (fold
-        (lambda (x found) (or found (is-eq x p)))
-        plist
-        false
-    )
+  (get found (fold contains-fold-step plist {found: false, target: p}))
 )
 
 ;; Private: buff21 a < buff21 b strictly (lex byte cmp; false if == or >)
-(define-private (buff21-lt? (a (buff 21)) (b (buff 21)))
+(define-private (buff21-lt-fold-step (idx uint) (accum {res: (optional bool), a: (buff 21), b: (buff 21)}))
+  (if (is-some (get res accum))
+    accum
     (let (
-        (byte-cmp
-            (fold
-                (lambda (idx res)
-                    (if (is-some res)
-                        res
-                        (let (
-                            (byte-a (unwrap-panic (element-at? a idx)))
-                            (byte-b (unwrap-panic (element-at? b idx)))
-                        )
-                            (cond
-                                (< byte-a byte-b) (some true)
-                                (> byte-a byte-b) (some false)
-                                true none  ;; ==
-                            )
-                        )
-                    )
-                )
-                (list 
-                    u0 u1 u2 u3 u4 u5 u6 u7 u8 u9
-                    u10 u11 u12 u13 u14 u15 u16 u17 u18 u19 u20
-                )
-                none
-            )
+        (byte-a (unwrap-panic (element-at? (get a accum) idx)))
+        (byte-b (unwrap-panic (element-at? (get b accum) idx)))
+      )
+      (let (
+        (new-res
+          (cond
+            (< byte-a byte-b) (some true)
+            (> byte-a byte-b) (some false)
+            true none  ;; ==
+          )
         )
+      )
+        (if (is-some new-res)
+          {res: new-res, a: (get a accum), b: (get b accum)}
+          accum
+        )
+      )
     )
-        (match byte-cmp some-val some-val false)  ;; all == -> false (not strict <)
-    )
+  )
+)
+
+(define-private (buff21-lt? (a (buff 21)) (b (buff 21)))
+  (match (get res (fold buff21-lt-fold-step
+      (list 
+        u0 u1 u2 u3 u4 u5 u6 u7 u8 u9
+        u10 u11 u12 u13 u14 u15 u16 u17 u18 u19 u20
+      )
+      {res: none, a: a, b: b}
+    )) some-val some-val false)
 )
 
 ;; Private: participants strictly ascending sorted by buff21 lex (implies unique, no dups)
 ;; Fails if len>20, any consecutive not <, or len>=2 no pairs.
-(define-private (is-sorted-principals? (plist (list 20 principal)))
-    (let ((n (len plist)))
-        (if (> n u20)
-            false
-            (if (<= n u1)
-                true  ;; 0/1 trivial
-                (fold
-                    (lambda (i sorted-so-far)
-                        (if (not sorted-so-far)
-                            false
-                            (if (>= i (- n u1))
-                                true  ;; no more pairs
-                                (let (
-                                    (curr (unwrap-panic (element-at? plist i)))
-                                    (next (unwrap-panic (element-at? plist (+ i u1))))
-                                    (curr-b (principal->buff21 curr))
-                                    (next-b (principal->buff21 next))
-                                )
-                                    (buff21-lt? curr-b next-b)
-                                )
-                            )
-                        )
-                    )
-                    (list 
-                        u0 u1 u2 u3 u4 u5 u6 u7 u8 u9
-                        u10 u11 u12 u13 u14 u15 u16 u17 u18 u19
-                    )
-                    true
-                )
+(define-private (sorted-fold-step (i uint) (accum {sorted: bool, plist: (list 20 principal), n: uint}))
+  (let (
+      (curr-sorted (get sorted accum))
+      (curr-plist (get plist accum))
+      (curr-n (get n accum))
+    )
+    (if (not curr-sorted)
+        {sorted: false, plist: curr-plist, n: curr-n}
+        (if (>= i (- curr-n u1))
+            {sorted: true, plist: curr-plist, n: curr-n}
+            (let (
+                (curr (unwrap-panic (element-at? curr-plist i)))
+                (next (unwrap-panic (element-at? curr-plist (+ i u1))))
+                (curr-b (principal->buff21 curr))
+                (next-b (principal->buff21 next))
+              )
+              {sorted: (and curr-sorted (buff21-lt? curr-b next-b)), plist: curr-plist, n: curr-n}
             )
         )
     )
+  )
+)
+
+(define-private (is-sorted-principals? (plist (list 20 principal)))
+  (let ((n (len plist)))
+    (if (> n u20)
+        false
+        (if (<= n u1)
+            true  ;; 0/1 trivial
+            (get sorted (fold sorted-fold-step
+                (list 
+                  u0 u1 u2 u3 u4 u5 u6 u7 u8 u9
+                  u10 u11 u12 u13 u14 u15 u16 u17 u18 u19
+                )
+                {sorted: true, plist: plist, n: n}
+            ))
+        )
+    )
+  )
 )
 
 ;; Chunk 2: EIP-712 hash helpers (sha256 adapted; LE uint serial via buff-from-uinteger pad-left0)
@@ -452,24 +463,23 @@
 )
 
 ;; Private: check all participants' acceptances are non-expired (assumes all accepted via count==len)
-(define-private (all-acceptances-fresh? (intent-hash (buff 32)) (participants (list 20 principal)) (now uint))
-  (fold
-    (lambda (p fresh)
-      (if (not fresh)
-        false
-        (let (
-          (acc-opt (map-get? acceptances {intent-hash: intent-hash, participant: p}))
-        )
-          (match acc-opt
-            acc (and (>= (get accept-expiry acc) now) true)
-            false  ;; missing acceptance
-          )
-        )
+(define-private (fresh-fold-step (p principal) (accum {fresh: bool, now: uint, intent-hash: (buff 32)}))
+  (if (not (get fresh accum))
+    accum
+    (let (
+        (acc-opt (map-get? acceptances {intent-hash: (get intent-hash accum), participant: p}))
+      )
+      (match acc-opt
+        acc {fresh: (and (get fresh accum) (>= (get accept-expiry acc) (get now accum))), 
+             now: (get now accum), intent-hash: (get intent-hash accum)}
+        none {fresh: false, now: (get now accum), intent-hash: (get intent-hash accum)}
       )
     )
-    participants
-    true
   )
+)
+
+(define-private (all-acceptances-fresh? (intent-hash (buff 32)) (participants (list 20 principal)) (now uint))
+  (get fresh (fold fresh-fold-step participants {fresh: true, now: now, intent-hash: intent-hash}))
 )
 
 ;; Public: execute ready coordination (EIP executeCoordination; any caller, verify payload, state to Executed)
@@ -541,6 +551,15 @@
   (is-some (map-get? acceptances {intent-hash: intent-hash, participant: p}))
 )
 
+;; Private: filter step for accepted-by
+(define-private (accepted-filter-step (p principal) (accum {accepted: (list 20 principal), intent-hash: (buff 32)}))
+  (if (is-accepted? (get intent-hash accum) p)
+    {accepted: (unwrap-panic (as-max-len? (append (get accepted accum) (list p)) u20)), 
+     intent-hash: (get intent-hash accum)}
+    accum
+  )
+)
+
 ;; Read-only: full coordination status (EIP getCoordinationStatus; auto-Expires if applicable)
 (define-read-only (get-coordination-status (intent-hash (buff 32)))
   (let
@@ -561,10 +580,9 @@
             )
           )
           (accepted-by
-            (filter
-              (lambda (p) (is-accepted? intent-hash p))
-              (get participants intent)
-            )
+            (get accepted (fold accepted-filter-step (get participants intent) 
+              {accepted: (unwrap-panic (as-max-len? (list ) u20)), intent-hash: intent-hash}
+            ))
           )
         )
         (ok
