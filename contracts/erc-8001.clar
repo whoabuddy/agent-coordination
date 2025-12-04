@@ -227,11 +227,16 @@
   )
 )
 
+;; Private: concat step for participant hash160s
+(define-private (participant-hash-fold-step (h (buff 20)) (accum buff))
+  (concat accum h)
+)
+
 ;; Private: participants hash = sha256(concat(p1.hash160 || p2.hash160 || ...)) (EIP equiv)
 (define-private (participants-to-hash (participants (list 20 principal)))
   (sha256
     (fold
-      (lambda (h accum) (concat accum h))
+      participant-hash-fold-step
       (map principal-hash160 participants)
       0x
     )
