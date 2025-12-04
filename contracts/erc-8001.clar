@@ -172,19 +172,15 @@
 )
 
 ;; Chunk 2: EIP-712 hash helpers (sha256 adapted; LE uint serial via buff-from-uinteger pad-left0)
-(define-constant DOMAIN_NAME_STR "ERC-8001")
-(define-constant DOMAIN_VERSION_STR "1")
+(define-constant DOMAIN_NAME_STR 0x4552432d38303031)
+(define-constant DOMAIN_VERSION_STR 0x31)
 (define-constant DOMAIN_NAME_HASH (sha256 DOMAIN_NAME_STR))
 (define-constant DOMAIN_VERSION_HASH (sha256 DOMAIN_VERSION_STR))
 
-(define-constant AGENT_INTENT_TYPE_STR
-  "AgentIntent(bytes32 payloadHash,uint64 expiry,uint64 nonce,address agentId,bytes32 coordinationType,uint256 coordinationValue,bytes32 participantsHash)"
-)
+(define-constant AGENT_INTENT_TYPE_STR 0x4167656e74496e74656e742862797465733332207061796c6f6164486173682c75696e743634206578706972792c75696e743634206e6f6e63652c61646472657373206167656e7449642c6279746573333220636f6f7264696e6174696f6e547970652c75696e7432353620636f6f7264696e6174696f6e56616c75652c627974657332207061727469636970616e74734861736829)
 (define-constant AGENT_INTENT_TYPEHASH (sha256 AGENT_INTENT_TYPE_STR))
 
-(define-constant ACCEPTANCE_TYPE_STR
-  "AcceptanceAttestation(bytes32 intentHash,address participant,uint64 nonce,uint64 expiry,bytes32 conditionsHash)"
-)
+(define-constant ACCEPTANCE_TYPE_STR 0x416363657074616e63654174746573746174696f6e286279746573333220696e74656e74486173682c61646472657373207061727469636970616e742c75696e743634206e6f6e63652c75696e743634206578706972792c62797465733220636f6e646974696f6e734861736829)
 (define-constant ACCEPTANCE_TYPEHASH (sha256 ACCEPTANCE_TYPE_STR))
 
 (define-constant SIG_PREFIX (concat 0x19 0x01))
@@ -200,14 +196,13 @@
 )
 
 
-;; Private: uint -> buff32 Stacks-ABI encode (sha256(int-to-ascii n); consistent w/ off-chain)
+;; Private: uint -> buff32 Stacks-ABI encode (sha256(uint) canonical LE u128 bytes; match off-chain)
 (define-private (buff32FromUint64 (n uint))
-  (sha256 (int-to-ascii n))
+  (sha256 n)
 )
 
-(define-constant VERIFYING_CONTRACT_HASH
-  (sha256 "stacks-sip-erc8001-ref-v1")
-)
+(define-constant VERIFYING_CONTRACT_STR 0x737461636b732d7369702d657263383030312d7265662d7631)
+(define-constant VERIFYING_CONTRACT_HASH (sha256 VERIFYING_CONTRACT_STR))
 
 ;; Private: buff20 -> buff32 pad-right 0x00 (EIP address equiv)
 (define-private (address-to-buff32 (p principal))
