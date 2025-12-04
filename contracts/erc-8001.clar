@@ -190,51 +190,19 @@
 (define-constant SIG_PREFIX (concat 0x19 0x01))
 
 (define-constant PAD_ZERO_12
-  (list
-    0x00 0x00 0x00 0x00 0x00 0x00
-    0x00 0x00 0x00 0x00 0x00 0x00
-  )
-)
-
-(define-constant PAD_ZERO_24
-  (list
-    0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x00
-    0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x00
-    0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x00
-  )
-)
-
-;; Private: uint (<=2^64-1) -> buff32 big-endian pad-left 0x00 (ABI encode equiv)
-(define-private (buff32FromUint64 (n uint))
-  (let
-    (
-      (b7 (bit-and (bit-shift-right n u56) u255))
-      (b6 (bit-and (bit-shift-right n u48) u255))
-      (b5 (bit-and (bit-shift-right n u40) u255))
-      (b4 (bit-and (bit-shift-right n u32) u255))
-      (b3 (bit-and (bit-shift-right n u24) u255))
-      (b2 (bit-and (bit-shift-right n u16) u255))
-      (b1 (bit-and (bit-shift-right n u8)  u255))
-      (b0 (bit-and n u255))
-      (bytes8be
-        (concat
-          (buff-from-uint8 b7)
-          (concat (buff-from-uint8 b6)
-            (concat (buff-from-uint8 b5)
-              (concat (buff-from-uint8 b4)
-                (concat (buff-from-uint8 b3)
-                  (concat (buff-from-uint8 b2)
-                    (concat (buff-from-uint8 b1) (buff-from-uint8 b0))
-                  )
-                )
-              )
-            )
-          )
-        )
-      )
+  (fold concat
+    (list
+      0x00 0x00 0x00 0x00 0x00 0x00
+      0x00 0x00 0x00 0x00 0x00 0x00
     )
-    (concat PAD_ZERO_24 bytes8be)
+    0x
   )
+)
+
+
+;; Private: uint -> buff32 Stacks-ABI encode (sha256(int-to-ascii n); consistent w/ off-chain)
+(define-private (buff32FromUint64 (n uint))
+  (sha256 (int-to-ascii n))
 )
 
 (define-constant VERIFYING_CONTRACT_HASH
@@ -370,7 +338,7 @@
           (intent-hash (intent-struct-hash payload-hash expiry nonce agent coord-type coord-value part-hash))
         )
         (asserts! (is-none (map-get? intents {intent-hash: intent-hash})) ERR_INVALID_PARTICIPANTS)
-        (try! (map-insert intents {intent-hash: intent-hash}
+        (map-insert intents {intent-hash: intent-hash}
           {
             agent: agent,
             payload-hash: payload-hash,
@@ -382,7 +350,7 @@
             status: PROPOSED,
             accept-count: u0
           }
-        ))
+        )
         (map-set agent-nonces {agent: agent} nonce)
         (print {
           event: "CoordinationProposed",
@@ -430,8 +398,8 @@
           )
           (asserts! (is-ok signer-opt) ERR_INVALID_SIG)
           (asserts! (is-eq (unwrap! signer-opt ERR_INVALID_SIG) caller) ERR_INVALID_SIG)
-          (try! (map-insert acceptances {intent-hash: intent-hash, participant: caller}
-            {accept-expiry: accept-expiry, conditions: conditions}))
+          (map-insert acceptances {intent-hash: intent-hash, participant: caller}
+            {accept-expiry: accept-expiry, conditions: conditions})
           (let
             (
               (old-count (get accept-count intent))
@@ -439,9 +407,9 @@
               (total (len (get participants intent)))
               (new-status (if (>= new-count total) READY PROPOSED))
             )
-            (try! (map-set intents {intent-hash: intent-hash}
+            (map-set intents {intent-hash: intent-hash}
               (merge intent
-                {accept-count: new-count, status: new-status})))
+                {accept-count: new-count, status: new-status}))
             (let ((acceptance-h (acceptance-struct-hash intent-hash caller accept-nonce accept-expiry conditions)))
               (print {
                 event: "CoordinationAccepted",
@@ -500,7 +468,7 @@
         (
           (new-intent (merge intent {status: EXECUTED}))
         )
-        (try! (map-set intents {intent-hash: intent-hash} new-intent))
+        (map-set intents {intent-hash: intent-hash} new-intent)
         (print {
           event: "CoordinationExecuted",
           intent-hash: intent-hash,
@@ -531,7 +499,7 @@
       (asserts! (not (is-eq (get status intent) EXECUTED)) ERR_INVALID_STATE)
       (asserts! (not (is-eq (get status intent) CANCELLED)) ERR_INVALID_STATE)
       (asserts! (or (is-eq tx-sender agent) (> now (get expiry intent))) ERR_UNAUTHORIZED)
-      (try! (map-set intents {intent-hash: intent-hash} (merge intent {status: CANCELLED})))
+      (map-set intents {intent-hash: intent-hash} (merge intent {status: CANCELLED}))
       (print {
         event: "CoordinationCancelled",
         intent-hash: intent-hash,
@@ -579,7 +547,7 @@
           )
           (accepted-by
             (get accepted (fold accepted-filter-step (get participants intent) 
-              {accepted: (unwrap-panic (as-max-len? (list ) u20)), intent-hash: intent-hash}
+              {accepted: (unwrap-panic (as-max-len? (list) u20)), intent-hash: intent-hash}
             ))
           )
         )
