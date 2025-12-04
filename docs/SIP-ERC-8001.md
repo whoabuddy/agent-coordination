@@ -1,7 +1,7 @@
 # Preamble
 
 SIP Number: XXX  
-Title: Standard for Multi-Party Agent Coordination  
+Title: ERC-8001 Agent Coordination Framework (EIP-8001 adapted for Stacks)  
 Author: [Kwame Bryan] (<kwame.bryan@gmail.com>)  
 Consideration: Technical  
 Type: Standard  
@@ -12,7 +12,7 @@ Sign-off: _(pending)_
 
 # Abstract
 
-This proposal introduces a standard primitive for secure coordination among multiple independent agents on the Stacks blockchain. It defines an **intent** message format and protocol by which an initiator posts a desired action (the intent) and other participants submit cryptographic acceptances. The intent becomes **executable** once all required participants have provided acceptance attestations before a specified expiry. This standard specifies the data structures, canonical status codes, Clarity contract interface, and rules needed to implement this coordination framework on Stacks. It leverages off-chain **signed structured data** (per SIP-018) and on-chain verification using Clarity’s cryptographic functions. By standardising multi-party approval workflows, SIP-XXX enables trust-minimised coordination in use cases such as multi-sig transactions, decentralised MEV mitigation strategies, and cross-contract agent actions, all using a common protocol.
+This proposal ports Ethereum's ERC-8001 as a Stacks SIP standard primitive for secure multi-party agent coordination. An initiator proposes an **AgentIntent** (EIP-712 typed data), participants submit **AcceptanceAttestation** signatures. Once all acceptances present/fresh, intent **Ready** for execution. Specifies adapted data structs (buff/sha256), status codes, Clarity interface, lifecycle rules. Uses Clarity sha256 + 32-byte big-endian field serialization (ABI-compatible packing). Reference impl `contracts/erc-8001.clar` (max 20 participants, standard principals).
 
 # Licence and Copyright
 
@@ -22,7 +22,7 @@ This SIP is released under the terms of the **Creative Commons CC0 1.0 Universal
 
 As decentralised applications and autonomous agents become more complex, there are many scenarios where a group of independent actors must agree on an action before it is executed. Examples include multi-signature wallet approvals, collaborative trades or arbitrage across DEXs, and MEV (Maximal Extractable Value) mitigation where solvers and bidders coordinate on transaction ordering. In current practice, these often rely on bespoke protocols or off-chain agreements, leading to fragmentation and potential security risks.
 
-On Ethereum, the concept of _intents_ has emerged to express desired actions in a chain-agnostic way, but earlier standards (like ERC-7521 and ERC-7683) handled only single-initiator flows:contentReference[oaicite:18]{index=18}. Ethereum’s recent ERC-8001 filled this gap by introducing a minimal coordination primitive for multiple parties:contentReference[oaicite:19]{index=19}. This SIP adapts ERC-8001’s approach to Stacks, taking into account Clarity’s design and existing SIPs (e.g. SIP-018 for signing data).
+ERC-8001 [EIP](https://eips.ethereum.org/EIPS/eip-8001) defines minimal single-chain multi-party coordination: initiator EIP-712 AgentIntent + per-participant EIP-712/1271 acceptances. Executable iff all accept & fresh. This SIP ports faithfully to Stacks/Clarity: sha256 (native), buff structs, principal20-hash160 packed, BE32 fields, tx-sender proves propose (no sig), secp256k1-recover for accepts.
 
 The key idea is that an initiator can propose an intent which enumerates all participants who need to agree. Each participant (including the initiator) produces a digital signature (an **acceptance attestation**) to confirm their agreement under certain conditions. These signatures are collected on-chain. If and only if every listed party’s attestation is present and valid within the allowed time window, the intent is marked as ready to execute. This guarantees that the intended action has unanimous approval from the required set of agents, without needing an off-chain coordinator to aggregate trust.
 
@@ -47,74 +47,72 @@ A compliant contract MUST provide a read-only function (e.g. `get-coordination-s
 
 ## Data Structures
 
-**Agent Intent:** The core message posted by an initiator describing the coordination request. It is a tuple of fields:
+**AgentIntent** (fields serialized sha256 for intentHash struct-hash):
 
-- `payloadHash` (`buff 32`): A hash (e.g. SHA-256 or KECCAK256) of the detailed payload of the intent. The payload can include domain-specific instructions or data for execution, but is not interpreted by the core contract (opaque to this SIP).
-- `expiry` (`uint`): A Unix timestamp (in seconds) by which the intent expires. The intent cannot be executed after this time. It MUST be set to a future time when proposing and is used to determine _Expired_ status.
-- `nonce` (`uint`): A monotonic sequence number for intents per initiator (agent). This provides replay protection – each new intent from the same agent MUST use a `nonce` greater than their previous intents’ nonces:contentReference[oaicite:23]{index=23}.
-- `agentId` (`principal`): The Stacks principal of the initiator (the one proposing the intent). This principal must match the transaction sender that creates the intent on-chain.
-- `coordinationType` (`buff 32`): An application-specific identifier for the type or context of this coordination. For example, it could be the hash of a string like `"MEV_SANDWICH_V1"` or `"MULTISIG_TXN"` to indicate how the payload should be interpreted by off-chain actors.
-- `coordinationValue` (`uint`): An optional value field (e.g. an amount in micro-STX or an abstract value) that is informational for the core protocol. The core standard does not assign meaning to this field, but higher-level modules MAY use it (for example, to require a bond or to encode an expected payment amount).
-- `participants` (`list(principal)`): The list of all participants’ principals involved in this intent, **including the initiator** (`agentId`). This list MUST be strictly ascending (sorted) by principal and contain no duplicates:contentReference[oaicite:24]{index=24}:contentReference[oaicite:25]{index=25}. Ordering the addresses canonically ensures everyone computes the same intent hash and prevents duplicate signers.
+- `payloadHash` `(buff 32)`: sha256(CoordinationPayload); checked at execute.
+- `expiry` `uint`: unix sec > now; intent/execute bound.
+- `nonce` `uint`: > get-agent-nonce(agent); replay prot.
+- `agentId` `principal`: proposer=tx-sender.
+- `coordinationType` `(buff 32)`: domain id e.g. sha256("MEV_SANDWICH_COORD_V1").
+- `coordinationValue` `uint`: informational.
+- `participants` `(list 20 principal)`: unique strictly ascending hash160; includes agent.
 
-**Acceptance Attestation:** A participant’s acceptance of an intent. It is represented by:
+**AcceptanceAttestation** (sig over EIP712-like digest; nonce=0 core):
 
-- `intentHash` (`buff 32`): The hash of the Agent Intent that the participant is agreeing to. (See **Signature Semantics** below for how this hash is computed).
-- `participant` (`principal`): The participant’s principal (the signer of this attestation).
-- `nonce` (`uint`): An optional nonce for the acceptance. In the core standard, this MAY be omitted or set to `0` for simplicity. (In extended use, participants could use a personal nonce to prevent replay of their acceptance across different similar intents, but that is not required here).
-- `expiry` (`uint`): The timestamp until which this acceptance is valid. This allows a participant to impose an earlier deadline than the intent’s overall expiry. The attestation is only valid to execute the intent if the current time is <= this expiry. Typically, participants set this equal to or slightly less than the intent’s `expiry` to ensure timely execution.
-- `conditionsHash` (`buff 32`): A hash of any participant-specific conditions for their acceptance. This field is optional and not interpreted by the base contract logic. It might encode constraints like “price must be above X” or other domain-specific requirements that the participant expects to be true at execution. If no extra conditions, this can be a zero hash (all 0x00 bytes).
-- `signature` (`buff 64/65`): The participant’s digital signature over the intent. This is the Secp256k1 ECDSA signature (65 bytes including recovery ID, or 64-byte compact form per EIP-2098) that proves the participant indeed signed the `intentHash` (and associated domain).
+- `intentHash` `(buff 32)`: intent-struct-hash (not full digest).
+- `participant` `principal`: signer=tx-sender.
+- `nonce` `uint`: u0 (core; modules MAY).
+- `expiry` `uint`: >now at accept/execute.
+- `conditionsHash` `(buff 32)`: participant constraints.
+- `signature` `(buff 65)`: secp256k1 (recid).
 
-**Coordination Payload:** (Optional in core) The full data that `payloadHash` represents. The structure of this payload is outside the scope of SIP-XXX, as it is application-specific. However, by convention it could include fields like `version` (a format identifier), `coordinationType` (MUST equal the above type for redundancy), `coordinationData` (opaque binary or structured commands to execute), `conditionsHash` (the combined conditions for execution), `timestamp` (when the intent was created), and `metadata`. These are not processed by the core contract, but hashing them into `payloadHash` ensures that all participants are agreeing to the exact same details.
+Struct-hash: sha256(TYPEHASH32 + fields32BE); domain-sha256(nameH||verH||chain32BE||verifH); digest=sha256(0x1901||domain||struct).
+
+**CoordinationPayload** (off-chain; sha256=payloadHash; opaque core):
+
+version `(buff 32)`, coordinationType `(buff 32)`, data `(buff ...)`, conditions `(buff 32)`, timestamp `uint`, metadata `(buff ...)`.
+
+## Hashing Semantics (SIP adaptation of EIP-712)
+
+- **participantsHash** = `sha256(concat(p.hash160 for p in participants))`
+- **intentStructHash** = `sha256(AGENT_INTENT_TYPEHASH + payloadHash + u64BE32(expiry) + u64BE32(nonce) + addr32(agent) + coordType + u256BE32(value) + participantsHash)`
+- **acceptanceStructHash** = `sha256(ACCEPTANCE_TYPEHASH + intentHash + addr32(participant) + u64BE32(nonce=0) + u64BE32(expiry) + conditions)`
+- **domainSep** = `sha256(nameH + versionH + chainIdBE32 + verifyingFixedH)`
+- **acceptDigest** = `sha256(0x1901 + domainSep + acceptanceStructHash)`
+- TYPEHASH = `sha256("AgentIntent(...)")` / `sha256("AcceptanceAttestation(...)")`
+- `intentHash` = intentStructHash (used in acceptance.intentHash)
+
+Off-chain sign acceptDigest; on-chain recover-pubkey(principal-of? == tx-sender).
 
 ## Signature Semantics and Domain Separation
 
-All signatures in this protocol MUST be made over a well-defined message that includes a domain separator specific to this SIP and the current contract:
+## Standard Contract Interface
 
-- The initiator’s signature covers the **Agent Intent**. Off-chain, the initiator SHOULD sign a digest computed as `H = keccak256(domain, AgentIntent)` or similar, where `domain` binds the network (mainnet/testnet), the SIP number, and the contract address (including contract name):contentReference[oaicite:26]{index=26}. This prevents an intent for one contract or chain from being re-used on another. The contract’s Clarity code can reconstruct the expected `intentHash` on-chain to verify any signatures.
-- Each participant’s **Acceptance Attestation** signature covers their `intentHash` plus their own constraints. In practice, a participant would sign a message encoding: the `intentHash` (linking to a specific intent), their `participant` address, optional `nonce`, `expiry`, and `conditionsHash`, along with the same domain separator. This yields a 32-byte hash that is then signed via Secp256k1.
-- Clarity’s `secp256k1-verify` or `secp256k1-recover?` functions are used to verify these signatures on-chain. A compliant implementation MUST support 65-byte signatures with low-S values and SHOULD support 64-byte compact signatures:contentReference[oaicite:27]{index=27}. If a signature’s recovery byte is present, the contract will use it to recover the public key and derive the signing principal (via `principal-of?`); otherwise, the contract can verify directly given a provided public key.
-- **Stacks Signed Message Prefix:** Implementations SHOULD prepend the standard `"Stacks Signed Message:\n"` prefix (as defined in SIP-018) when computing signature hashes for off-chain signing:contentReference[oaicite:28]{index=28}. However, since SIP-018 primarily covers personal messages, the use of a structured EIP-712-like approach with an explicit domain as described is RECOMMENDED for clarity and to avoid ambiguities.
+Compliant contracts expose:
+
+```
+(define-public (propose-coordination (payload-hash (buff 32)) (expiry uint) (nonce uint) (coord-type (buff 32)) (coord-value uint) (participants (list 20 principal))) (response (buff 32) uint))
+
+(define-public (accept-coordination (intent-hash (buff 32)) (accept-expiry uint) (conditions (buff 32)) (sig (buff 65))) (response bool uint))
+
+(define-public (execute-coordination (intent-hash (buff 32)) (payload (buff 1024)) (execution-data (buff 1024))) (response bool (buff 1024)))
+
+(define-public (cancel-coordination (intent-hash (buff 32)) (reason (string-ascii 34))) (response bool uint))
+
+(define-read-only (get-coordination-status (intent-hash (buff 32))) (response {status: uint, agent: principal, participants: (list 20 principal), accepted-by: (list 20 principal), expiry: uint} uint))
+
+(define-read-only (get-required-acceptances (intent-hash (buff 32))) (response uint uint))
+
+(define-read-only (get-agent-nonce (agent principal)) uint)
+```
+
+Events via `print` tuples matching EIP-8001.
 
 By following these semantics, any signature collected under this standard is tightly bound to the specific intent and contract, mitigating replay attacks across contexts.
 
 ## Standard Contract Interface (Clarity)
 
-An implementing smart contract MUST provide public functions roughly as follows (names are illustrative):
-
-- `(define-public (propose-intent (intent <IntentType>)) (response (buff 32) uint))`  
-  Creates a new intent on-chain. Accepts the intent fields (or a struct/tuple) as parameters. On success, stores the intent and returns a unique identifier (e.g. the `intentHash`). The function MUST verify that:
-  - `intent.agentId` matches the `tx-sender` (only the initiator can propose their intent).
-  - The `participants` list includes `agentId` and is sorted and without duplicates.
-  - `intent.nonce` is strictly greater than the last used nonce for this `agentId` (to prevent reuse).
-  - `intent.expiry` is in the future (greater than current time).
-    If these checks pass, the intent is recorded (e.g. in a map from `intentHash` to intent data) with status `Proposed`:contentReference[oaicite:29]{index=29}. It also initialises tracking for acceptances (e.g. zero accepted count). If any check fails, it returns an error code and does not create the intent.
-- `(define-public (accept-intent (intent-hash (buff 32)) (sig (buff 65)) [optional pubkey/fields])) (response bool uint))`  
-  Records a participant’s acceptance for the given intent. The participant calling this function (`tx-sender`) is implicitly the accepting principal. The contract will:
-  - Look up the intent by `intent-hash`. If not found, return an error (intent doesn’t exist).
-  - Check that the intent’s status is `Proposed` (only accept if still gathering signatures).
-  - Verify that `tx-sender` is indeed one of the intent’s `participants` and that they have not already accepted.
-  - Verify the provided `sig` using `tx-sender`’s public key or by recovering it. The signature must be valid ECDSA over the expected acceptance message (containing `intentHash` and the participant’s constraints). If the contract requires the participant to also supply their `expiry` or `conditionsHash`, it must check those values too against what was signed.
-  - Check that neither the intent nor the acceptance is expired at the current time.
-    On success, the acceptance is recorded (e.g. mark this participant as having signed, increment a counter) and if this was the last required acceptance, update the intent’s status to `Ready`. The function returns `(ok true)` on success. If any verification fails, it returns an error code.
-- `(define-public (execute-intent (intent-hash (buff 32)) (payload <PayloadType>)) (response bool uint))`  
-  Marks a ready intent as executed. This would typically be called by a designated executor (which could be one of the participants or any party, depending on the use case) when it performs the action described in the intent’s payload. The contract MUST verify:
-  - The intent exists and has status `Ready`.
-  - The current time is <= intent’s expiry and all acceptance expiries (i.e., not too late to execute).
-  - (Optionally, the provided `payload` matches the stored `payloadHash` to ensure the actual execution details correspond to what was agreed. Often the payload execution happens off-chain or in another contract, so this might not be applicable in every implementation.)
-    On success, the contract sets the status to `Executed` and returns true. Typically, the actual business logic (transferring funds, etc.) is executed off-chain or by another contract that coordinates with this one — SIP-XXX’s reference implementation only handles the state change and verification, not the actual fulfilment of the intent’s action.
-- `(define-public (cancel-intent (intent-hash (buff 32))) (response bool uint))`  
-  Allows the initiator (and **only** the initiator) to cancel an intent that is not yet executed. This function:
-
-  - Verifies `tx-sender` equals the intent’s `agentId`.
-  - If the intent is still `Proposed` or `Ready` (i.e., not executed/expired), it sets status to `Cancelled`. (Once cancelled, any future accept or execute calls for that intent should fail.)
-    Returns true on successful cancellation. Cancellation is useful if the initiator wants to abort the process (for example, if conditions changed or a mistake was made), even if some signatures have already been collected. Participants can also implicitly “cancel” by simply not signing, but this formal cancel allows reclaiming of resources or clearing intents.
-
-- `(define-read-only (get-coordination-status (intent-hash (buff 32))) (response uint uint))`  
-  Returns the current status code (0–5 as defined above) of the given intent, or an error if the intent is not found. This is used by off-chain clients or other contracts to poll the state of an intent.
-
-The above interface is an example; the actual function names and parameters may vary, but any SIP-XXX compliant contract **MUST** provide equivalent functionality.
+Semantics match ERC-8001 exactly (reverts, events, status transitions); see EIP spec.
 
 ## Lifecycle Rules
 
@@ -148,12 +146,4 @@ One consideration: SIP-018 (Structured Data Signing) should be compatible with t
 
 ## Reference Implementation
 
-A reference implementation of this standard is provided in the accompanying file: [`contracts/agent-coordination.clar`](contracts/agent-coordination.clar). This Clarity contract illustrates one way to realise SIP-XXX. It uses:
-
-- A map to store proposed intents (keyed by a 32-byte intent hash).
-- A map to track each initiator’s latest nonce (to enforce monotonic nonces).
-- Functions `propose-intent`, `accept-intent`, `cancel-intent`, `execute-intent`, and getters for status, closely following the interface described above.
-- Signature verification via `secp256k1-recover?` to derive the signer’s public key and then `principal-of?` to get the corresponding principal, which is compared to the claimed participant.
-- Checks for sorted participants and expiry conditions.
-
-Developers can refer to this implementation as a starting point for their own contracts. Note that depending on the use case, you may need to adjust data types (e.g. use SHA-256 instead of KECCAK, or handle different payload schemas). The reference code is provided under CC0 licence for maximum reuse.
+Reference implementation: [`contracts/erc-8001.clar`](contracts/erc-8001.clar). Implements core EIP-8001 semantics: sha256/BE32 hashing, strict sorted participants (buff21 lex), nonce/replay prot, expiry checks (intent+per-accept), events, getters. Max 20 parts (decidable). Propose tx-proves (no sig), accepts recover-pubk. No payload exec (modules add). Old ref `docs/SIP-ERC-8001-old-reference.clar` deprecated.

@@ -28,6 +28,7 @@
     {intent-hash: (buff 32)}
     {
         agent: principal,
+        payload-hash: (buff 32),
         expiry: uint,
         nonce: uint,
         coord-type: (buff 32),
@@ -163,22 +164,66 @@
   )
 )
 
+(define-constant PAD_ZERO_24
+  (buff 24
+    0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x00
+    0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x00
+    0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x00
+  )
+)
+
+;; Private: uint (<=2^64-1) -> buff32 big-endian pad-left 0x00 (ABI encode equiv)
+(define-private (u64->buff32-be (n uint))
+  (let
+    (
+      (b7 (& (>> n u56) u255))
+      (b6 (& (>> n u48) u255))
+      (b5 (& (>> n u40) u255))
+      (b4 (& (>> n u32) u255))
+      (b3 (& (>> n u24) u255))
+      (b2 (& (>> n u16) u255))
+      (b1 (& (>> n u8) u255))
+      (b0 (& n u255))
+      (bytes8be
+        (concat
+          (buff-from-uint8 b7)
+          (concat (buff-from-uint8 b6)
+            (concat (buff-from-uint8 b5)
+              (concat (buff-from-uint8 b4)
+                (concat (buff-from-uint8 b3)
+                  (concat (buff-from-uint8 b2)
+                    (concat (buff-from-uint8 b1) (buff-from-uint8 b0))
+                  )
+                )
+              )
+            )
+          )
+        )
+      )
+    )
+    (concat PAD_ZERO_24 bytes8be)
+  )
+)
+
+(define-constant VERIFYING_CONTRACT_HASH
+  (sha256 (string-ascii "stacks-sip-erc8001-ref-v1"))
+)
+
 ;; Private: buff20 -> buff32 pad-right 0x00 (EIP address equiv)
 (define-private (address-to-buff32 (p principal))
   (concat (principal-hash160 p) PAD_ZERO_12)
 )
 
-;; Private: domain separator (sha256(nameH32 + versionH32 + chainId32LE + verifyingContract32))
+;; Private: domain separator (sha256(nameH32 + versionH32 + chainId32BE + verifyingFixed32))
 (define-private (get-domain-separator)
   (let
     (
-      (chain32 (buff-from-uinteger (chain-id) u32))
-      (verifying32 (address-to-buff32 contract-caller))
+      (chain32 (u64->buff32-be (chain-id)))
     )
     (sha256
       (concat DOMAIN_NAME_HASH
         (concat DOMAIN_VERSION_HASH
-          (concat chain32 verifying32)
+          (concat chain32 VERIFYING_CONTRACT_HASH)
         )
       )
     )
@@ -196,7 +241,7 @@
   )
 )
 
-;; Private: agent intent struct hash (sha256(typeH || fields serialized))
+;; Private: agent intent struct hash (sha256(typeH32 || payload32 || expiry64->32BE || nonce64->32BE || agent32 || type32 || value256->32BE || part32))
 (define-private (intent-struct-hash
     (payload-hash (buff 32))
     (expiry uint)
@@ -210,14 +255,14 @@
     (concat AGENT_INTENT_TYPEHASH
       (concat payload-hash
         (concat
-          (buff-from-uinteger expiry u8)
+          (u64->buff32-be expiry)
           (concat
-            (buff-from-uinteger nonce u8)
+            (u64->buff32-be nonce)
             (concat
               (address-to-buff32 agent)
               (concat coord-type
                 (concat
-                  (buff-from-uinteger coord-value u32)
+                  (u64->buff32-be coord-value)
                   part-hash
                 )
               )
@@ -229,7 +274,7 @@
   )
 )
 
-;; Private: acceptance struct hash (sha256(typeH || intentH32 || part32 || nonce8 || expiry8 || cond32))
+;; Private: acceptance struct hash (sha256(typeH32 || intent32 || part32 || nonce64->32BE || expiry64->32BE || cond32))
 (define-private (acceptance-struct-hash
     (intent-hash (buff 32))
     (participant principal)
@@ -243,9 +288,9 @@
         (concat
           (address-to-buff32 participant)
           (concat
-            (buff-from-uinteger accept-nonce u8)
+            (u64->buff32-be accept-nonce)
             (concat
-              (buff-from-uinteger accept-expiry u8)
+              (u64->buff32-be accept-expiry)
               conditions
             )
           )
@@ -296,6 +341,7 @@
         (try! (map-insert intents {intent-hash: intent-hash}
           {
             agent: agent,
+            payload-hash: payload-hash,
             expiry: expiry,
             nonce: nonce,
             coord-type: coord-type,
@@ -315,6 +361,68 @@
           coordination-value: coord-value
         })
         (ok intent-hash)
+      )
+    )
+  )
+)
+
+;; Public: participant accepts coordination (EIP acceptCoordination; tx-sender=participant, sig over acceptance-digest nonce=0)
+(define-public (accept-coordination (intent-hash (buff 32)) (accept-expiry uint) (conditions (buff 32)) (sig (buff 65)))
+  (let
+    (
+      (now (stacks-block-time))
+      (caller tx-sender)
+      (intent-opt (map-get? intents {intent-hash: intent-hash}))
+    )
+    (asserts! (some? intent-opt) ERR_NOT_FOUND)
+    (let
+      (
+        (intent (unwrap! intent-opt ERR_NOT_FOUND))
+      )
+      (asserts! (> (get expiry intent) now) ERR_EXPIRED)
+      (asserts! (is-eq (get status intent) PROPOSED) ERR_INVALID_STATE)
+      (asserts! (contains-principal? (get participants intent) caller) ERR_NOT_PARTICIPANT)
+      (asserts! (is-none (map-get? acceptances {intent-hash: intent-hash, participant: caller})) ERR_ALREADY_ACCEPTED)
+      (asserts! (> accept-expiry now) ERR_ACCEPT_EXPIRED)
+      (let
+        (
+          (accept-nonce u0)
+          (digest (acceptance-digest intent-hash caller accept-nonce accept-expiry conditions))
+          (pubkey-opt (secp256k1-recover? digest sig))
+        )
+        (asserts! (is-ok pubkey-opt) ERR_INVALID_SIG)
+        (let
+          (
+            (pubkey (unwrap! pubkey-opt ERR_INVALID_SIG))
+            (signer-opt (principal-of? pubkey))
+          )
+          (asserts! (is-ok signer-opt) ERR_INVALID_SIG)
+          (asserts! (is-eq (unwrap! signer-opt ERR_INVALID_SIG) caller) ERR_INVALID_SIG)
+          (try! (map-insert acceptances {intent-hash: intent-hash, participant: caller}
+            {accept-expiry: accept-expiry, conditions: conditions}))
+          (let
+            (
+              (old-count (get accept-count intent))
+              (new-count (+ old-count u1))
+              (total (len (get participants intent)))
+              (new-status (if (>= new-count total) READY PROPOSED))
+            )
+            (try! (map-set intents {intent-hash: intent-hash}
+              (merge intent
+                {accept-count: new-count, status: new-status})))
+            (let ((acceptance-h (acceptance-struct-hash intent-hash caller accept-nonce accept-expiry conditions)))
+              (print {
+                event: "CoordinationAccepted",
+                intent-hash: intent-hash,
+                participant: caller,
+                acceptance-hash: acceptance-h,
+                accepted-count: new-count,
+                required-count: total
+              })
+              (ok (>= new-count total))
+            )
+          )
+        )
       )
     )
   )

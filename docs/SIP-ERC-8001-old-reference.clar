@@ -1,3 +1,4 @@
+;; DEPRECATED: Old reference implementation. Use contracts/erc-8001.clar for updated ERC-8001/SIP compliant ref.
 ;; SIP-XXX Agent Coordination Contract
 ;; This contract implements the core logic of SIP-XXX: proposing intents, collecting acceptances, and state transitions.
 ;;
