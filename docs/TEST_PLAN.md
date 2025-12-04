@@ -65,9 +65,9 @@ function mineToExpiry() {
 - [x] Fail: agent missing from participants → ERR_INVALID_PARTICIPANTS (108)
 - [x] Fail: duplicates → ERR_INVALID_PARTICIPANTS (108)
 - [x] Fail: unsorted → ERR_INVALID_PARTICIPANTS (108)
-- [ ] Fail: >20 participants → ERR_INVALID_PARTICIPANTS (108)
+- [x] Fail: >20 participants → ERR_INVALID_PARTICIPANTS (108)
 - [ ] Fail: duplicate intent-hash (re-propose same) → ERR_INVALID_PARTICIPANTS (108)? Or custom err
-- [ ] Print: "CoordinationProposed" {intent-hash, proposer, ...}
+- [x] Event: "erc-8001/coordination-proposed" {intent-hash, proposer, ...}
 
 ## Public Functions: accept-coordination
 
@@ -97,11 +97,11 @@ function mineToExpiry() {
 ## Public Functions: cancel-coordination
 
 - [ ] Fail: EXECUTED → ERR_INVALID_STATE (102)
-- [ ] Fail: already CANCELLED → ERR_INVALID_STATE (102)
-- [ ] Fail: unauthorized (non-agent pre-expiry) → ERR_UNAUTHORIZED (100)
-- [ ] Success: agent pre-expiry → ok(true), status=CANCELLED
+- [x] Fail: already CANCELLED → ERR_INVALID_STATE (102)
+- [x] Fail: unauthorized (non-agent pre-expiry) → ERR_UNAUTHORIZED (100)
+- [x] Success: agent pre-expiry → ok(true), status=CANCELLED
 - [ ] Success: anyone post-expiry → ok(true), status=CANCELLED
-- [ ] Print: "CoordinationCancelled" {..., finalStatus: 4}
+- [ ] Event: "erc-8001/coordination-cancelled" {..., final-status: 4}
 
 ## Read-only Functions
 
