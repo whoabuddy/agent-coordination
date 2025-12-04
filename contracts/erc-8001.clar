@@ -479,7 +479,7 @@
           gasUsed: u0,
           result: 0x
         })
-        (ok true 0x)
+        (ok 0x)
       )
     )
   )
