@@ -522,7 +522,7 @@
 ;; Private: filter step for accepted-by
 (define-private (accepted-filter-step (p principal) (accum {accepted: (list 20 principal), intent-hash: (buff 32)}))
   (if (is-accepted? (get intent-hash accum) p)
-    {accepted: (unwrap-panic (as-max-len? (append (get accepted accum) (list p)) u20)), 
+    {accepted: (unwrap-panic (as-max-len? (append (get accepted accum) p) u20)), 
      intent-hash: (get intent-hash accum)}
     accum
   )
