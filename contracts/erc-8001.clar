@@ -272,3 +272,51 @@
   )
 )
 
+;; Public: propose new coordination intent (EIP proposeCoordination fields; tx-sender=agent, no sig/payload)
+(define-public (propose-coordination (payload-hash (buff 32)) (expiry uint) (nonce uint) (coord-type (buff 32)) (coord-value uint) (participants (list 20 principal)))
+  (let
+    (
+      (agent tx-sender)
+      (now (stacks-block-time))
+    )
+    (asserts! (> expiry now) ERR_EXPIRED)
+    (let
+      (
+        (prev-nonce (default-to u0 (map-get? agent-nonces {agent: agent})))
+      )
+      (asserts! (> nonce prev-nonce) ERR_NONCE_TOO_LOW)
+      (asserts! (is-sorted-principals? participants) ERR_INVALID_PARTICIPANTS)
+      (asserts! (contains-principal? participants agent) ERR_INVALID_PARTICIPANTS)
+      (let
+        (
+          (part-hash (participants-to-hash participants))
+          (intent-hash (intent-struct-hash payload-hash expiry nonce agent coord-type coord-value part-hash))
+        )
+        (asserts! (is-none (map-get? intents {intent-hash: intent-hash})) ERR_INVALID_PARTICIPANTS)
+        (try! (map-insert intents {intent-hash: intent-hash}
+          {
+            agent: agent,
+            expiry: expiry,
+            nonce: nonce,
+            coord-type: coord-type,
+            coord-value: coord-value,
+            participants: participants,
+            status: PROPOSED,
+            accept-count: u0
+          }
+        ))
+        (map-set agent-nonces {agent: agent} nonce)
+        (print {
+          event: "CoordinationProposed",
+          intent-hash: intent-hash,
+          proposer: agent,
+          coordination-type: coord-type,
+          participant-count: (len participants),
+          coordination-value: coord-value
+        })
+        (ok intent-hash)
+      )
+    )
+  )
+)
+
