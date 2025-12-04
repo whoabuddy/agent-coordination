@@ -88,7 +88,7 @@ Off-chain sign acceptDigest; on-chain recover-pubkey(principal-of? == tx-sender)
 
 ## Standard Contract Interface
 
-Compliant contracts expose:
+Compliant contracts expose **exactly** these functions (ref impl `contracts/erc-8001.clar`):
 
 ```
 (define-public (propose-coordination (payload-hash (buff 32)) (expiry uint) (nonce uint) (coord-type (buff 32)) (coord-value uint) (participants (list 20 principal))) (response (buff 32) uint))
@@ -106,7 +106,25 @@ Compliant contracts expose:
 (define-read-only (get-agent-nonce (agent principal)) uint)
 ```
 
-Events via `print` tuples matching EIP-8001.
+**Errors** (u100+ canonical, revert w/ `asserts!` / `err`):
+
+| Code | Error |
+|------|-------|
+| u100 | Unauthorized |
+| u101 | NotFound |
+| u102 | InvalidState |
+| u103 | InvalidSig |
+| u104 | NotParticipant |
+| u105 | AlreadyAccepted |
+| u106 | Expired (intent) |
+| u107 | NonceTooLow |
+| u108 | InvalidParticipants (unsorted/dups/missing-agent/collision/max20) |
+| u109 | AcceptExpired |
+| u110 | PayloadHashMismatch |
+
+Events: `print` tuples match EIP-8001 exactly.
+
+Semantics: **MUST** match EIP-8001 (reverts, lifecycle, checks); see [EIP](https://eips.ethereum.org/EIPS/eip-8001).
 
 By following these semantics, any signature collected under this standard is tightly bound to the specific intent and contract, mitigating replay attacks across contexts.
 

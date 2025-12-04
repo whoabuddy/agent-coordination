@@ -514,3 +514,62 @@
   )
 )
 
+;; Private: filter accepted participants (for status getter)
+(define-private (is-accepted? (intent-hash (buff 32)) (p principal))
+  (is-some (map-get? acceptances {intent-hash: intent-hash, participant: p}))
+)
+
+;; Read-only: full coordination status (EIP getCoordinationStatus; auto-Expires if applicable)
+(define-read-only (get-coordination-status (intent-hash (buff 32)))
+  (let
+    (
+      (intent-opt (map-get? intents {intent-hash: intent-hash}))
+      (now (stacks-block-time))
+    )
+    (match intent-opt
+      intent
+      (let
+        (
+          (stored-status (get status intent))
+          (expiry (get expiry intent))
+          (effective-status
+            (if (or (is-eq stored-status EXECUTED) (is-eq stored-status CANCELLED))
+              stored-status
+              (if (> now expiry) EXPIRED stored-status)
+            )
+          )
+          (accepted-by
+            (filter
+              (lambda (p) (is-accepted? intent-hash p))
+              (get participants intent)
+            )
+          )
+        )
+        (ok
+          {
+            status: effective-status,
+            agent: (get agent intent),
+            participants: (get participants intent),
+            accepted-by: accepted-by,
+            expiry: expiry
+          }
+        )
+      )
+      (err ERR_NOT_FOUND)
+    )
+  )
+)
+
+;; Read-only: required acceptances count (EIP getRequiredAcceptances)
+(define-read-only (get-required-acceptances (intent-hash (buff 32)))
+  (match (map-get? intents {intent-hash: intent-hash})
+    intent (ok (len (get participants intent)))
+    (err ERR_NOT_FOUND)
+  )
+)
+
+;; Read-only: agent's latest nonce (EIP getAgentNonce)
+(define-read-only (get-agent-nonce (agent principal))
+  (default-to u0 (map-get? agent-nonces {agent: agent}))
+)
+
