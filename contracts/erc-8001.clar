@@ -34,17 +34,17 @@
 (define-constant CANCELLED u4)
 (define-constant EXPIRED u5)
 
-(define-constant ERR_UNAUTHORIZED u100)
-(define-constant ERR_NOT_FOUND u101)
-(define-constant ERR_INVALID_STATE u102)
-(define-constant ERR_INVALID_SIG u103)
-(define-constant ERR_NOT_PARTICIPANT u104)
-(define-constant ERR_ALREADY_ACCEPTED u105)
-(define-constant ERR_EXPIRED u106)
-(define-constant ERR_NONCE_TOO_LOW u107)
-(define-constant ERR_INVALID_PARTICIPANTS u108)
-(define-constant ERR_ACCEPT_EXPIRED u109)
-(define-constant ERR_PAYLOAD_HASH_MISMATCH u110)
+(define-constant ERR_UNAUTHORIZED (err u100))
+(define-constant ERR_NOT_FOUND (err u101))
+(define-constant ERR_INVALID_STATE (err u102))
+(define-constant ERR_INVALID_SIG (err u103))
+(define-constant ERR_NOT_PARTICIPANT (err u104))
+(define-constant ERR_ALREADY_ACCEPTED (err u105))
+(define-constant ERR_EXPIRED (err u106))
+(define-constant ERR_NONCE_TOO_LOW (err u107))
+(define-constant ERR_INVALID_PARTICIPANTS (err u108))
+(define-constant ERR_ACCEPT_EXPIRED (err u109))
+(define-constant ERR_PAYLOAD_HASH_MISMATCH (err u110))
 
 ;; Storage
 (define-map intents 
