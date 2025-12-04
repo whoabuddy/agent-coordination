@@ -100,10 +100,12 @@
       )
       (let (
         (new-res
-          (cond
-            (< byte-a byte-b) (some true)
-            (> byte-a byte-b) (some false)
-            true none  ;; ==
+          (if (< byte-a byte-b)
+            (some true)
+            (if (> byte-a byte-b)
+              (some false)
+              none
+            )
           )
         )
       )
