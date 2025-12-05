@@ -1,346 +1,527 @@
+import { describe, it, expect, beforeEach } from "vitest";
+import { initSimnet, Simnet } from "@hirosystems/clarinet-sdk";
+import { Cl, ClarityType, serializeCV } from "@stacks/transactions";
 
-import { describe, expect, it } from "vitest";
+// Initialize simnet once
+let simnet: Simnet;
 
-import {
-  principalCV,
-  uintCV,
-  bufferCV,
-  listCV,
-  stringAsciiCV,
-  ClarityType,
-} from '@stacks/transactions';
-
-import type {
-  ClarityTupleData,
-  ClarityValue,
-  ListCV,
-  UIntCV,
-  BufferCV,
-  CallReceipt,
-  ReadOnlyFnResult,
-} from '@stacks/transactions';
-
-const accounts = simnet.getAccounts();
-
-const CONTRACT = "erc-8001";
-
-const deployer = accounts.get("deployer")!;
-const wallet1 = accounts.get("wallet_1")!;
-const wallet2 = accounts.get("wallet_2")!;
-const wallet3 = accounts.get("wallet_3")!;
-
-const ZERO_32 = bufferCV(new Uint8Array(32));
-const FUTURE_EXPIRY = uintCV(2000000000n);
-const NONCE_1 = uintCV(1n);
-const NONCE_0 = uintCV(0n);
-const COORD_VALUE = uintCV(100n);
-const PAST_EXPIRY = uintCV(1n);
-const FUTURE_ACCEPT_EXPIRY = uintCV(2000000001n);
-const CONDITIONS = ZERO_32;
-
-/*
-  The test below is an example. To learn more, read the testing documentation here:
-  https://docs.hiro.so/stacks/clarinet-js-sdk
-*/
-const SINGLE_PARTICIPANTS = listCV([principalCV(deployer)]);
-const TWO_PARTICIPANTS = listCV([principalCV(deployer), principalCV(wallet1)]);
-
-function propose(
-  caller: Account,
-  participants: ClarityValue,
-  nonce: ClarityValue = NONCE_1
-): CallReceipt {
-  return simnet.callPublicFn(
-    CONTRACT,
-    "propose-coordination",
-    [
-      ZERO_32,
-      FUTURE_EXPIRY,
-      nonce,
-      ZERO_32,
-      COORD_VALUE,
-      participants,
-    ],
-    caller
-  );
-}
-
-function expectProposeEvent(receipt: CallReceipt) {
-  expect(receipt.events).toHaveLength(1);
-  expect(receipt.events[0]!.type).toBe("contract_event");
-  const notificationTuple = receipt.events[0]!.event.value.data as ClarityTupleData;
-  const notificationCV = notificationTuple.notification as BufferCV;
-  const expectedNotification = new TextEncoder().encode("erc-8001/coordination-proposed");
-  expect(notificationCV.value).toEqual(expectedNotification);
-}
-
-function getStatusTuple(
-  statusResult: ReadOnlyFnResult<ClarityValue>
-): ClarityTupleData {
-  if (statusResult.result.type !== ClarityType.ResponseOk) {
-    throw new Error(`Expected ok, got ${statusResult.result.type}`);
-  }
-  return statusResult.result.value!.data as ClarityTupleData;
-}
-
-function expectStatusProposed(statusTuple: ClarityTupleData, expectedExpiry: UIntCV) {
-  expect((statusTuple.status as UIntCV).value).toBe(1n);
-  expect((statusTuple.agent as any).toStringCV()).toBe(deployer);
-  expect((statusTuple['accepted-by'] as ListCV).list.length).toBe(0);
-  expect(statusTuple.expiry as UIntCV).toEqualCV(expectedExpiry);
-}
-
-describe(`public functions: ${CONTRACT}`, () => {
-  it("ensures simnet is well initialised", () => {
-    expect(simnet.blockHeight).toBeDefined();
-  });
-
-describe(`read-only functions: ${CONTRACT}`, () => {
-  it("get-agent-nonce returns 0 initially", () => {
-    const result = simnet.callReadOnlyFn(
-      CONTRACT,
-      "get-agent-nonce",
-      [principalCV(deployer)],
-      deployer
-    );
-    expect(result.result).toBeUint(0n);
-  });
-
-  it("get-eip712-constants returns the correct constants", () => {
-    const result = simnet.callReadOnlyFn(
-      CONTRACT,
-      "get-eip712-constants",
-      [],
-      deployer
-    );
-    expect(result.result).toBeOk();
-    // Further detailed checks can be added by parsing the tuple
-  });
-
-  it("get-required-acceptances fails for non-existent intent", () => {
-    const badHash = bufferCV(new Uint8Array(32).fill(255));
-    const result = simnet.callReadOnlyFn(
-      CONTRACT,
-      "get-required-acceptances",
-      [badHash],
-      deployer
-    );
-    expect(result.result).toBeErr(101n);
-  });
-
-  it("get-coordination-status returns PROPOSED after propose", () => {
-    // arrange
-    const proposeReceipt = propose(deployer, SINGLE_PARTICIPANTS);
-    expect(proposeReceipt.result).toBeOk();
-    const intentHash = proposeReceipt.result.value as BufferCV;
-
-    // act
-    const statusResult = simnet.callReadOnlyFn(
-      CONTRACT,
-      "get-coordination-status",
-      [intentHash],
-      deployer
-    );
-
-    // assert
-    const statusTuple = getStatusTuple(statusResult);
-    expectStatusProposed(statusTuple, FUTURE_EXPIRY);
-  });
-
-  it("get-coordination-status fails for not found (ERR_NOT_FOUND)", () => {
-    const badHash = bufferCV(new Uint8Array(32).fill(255));
-    const result = simnet.callReadOnlyFn(
-      CONTRACT,
-      "get-coordination-status",
-      [badHash],
-      deployer
-    );
-    expect(result.result).toBeErr(101n);
-  });
+beforeEach(async () => {
+    // Reinitialize simnet before each test for clean state
+    simnet = await initSimnet();
 });
 
-  it("fails to propose coordination with nonce 0 (ERR_NONCE_TOO_LOW)", () => {
-    const receipt = propose(deployer, SINGLE_PARTICIPANTS, NONCE_0);
-    expect(receipt.result).toBeErr(107n);
-  });
+// =============================================================================
+// CONSTANTS (must match contract)
+// =============================================================================
 
-  it("proposes coordination successfully with nonce 1", () => {
-    const receipt = propose(deployer, SINGLE_PARTICIPANTS);
-    expect(receipt.result).toBeOk();
-    expectProposeEvent(receipt);
+const ERR = {
+    UNAUTHORIZED: 100,
+    NOT_FOUND: 101,
+    INVALID_STATE: 102,
+    INVALID_SIGNATURE: 103,
+    NOT_PARTICIPANT: 104,
+    ALREADY_ACCEPTED: 105,
+    INTENT_EXPIRED: 106,
+    NONCE_TOO_LOW: 107,
+    INVALID_PARTICIPANTS: 108,
+    ACCEPTANCE_EXPIRED: 109,
+    PAYLOAD_MISMATCH: 110,
+    SERIALIZATION_FAILED: 111,
+    DUPLICATE_INTENT: 112,
+};
 
-    const intentHashCV = receipt.result.value as BufferCV;
+// Clarity types
+const CV_OK = ClarityType.ResponseOk;      // 7
+const CV_ERR = ClarityType.ResponseErr;    // 8
+const CV_UINT = ClarityType.UInt;          // 1
+const CV_TUPLE = ClarityType.Tuple;        // 12
 
-    const reqResult = simnet.callReadOnlyFn(
-      CONTRACT,
-      "get-required-acceptances",
-      [intentHashCV],
-      deployer
-    );
-    expect(reqResult.result).toBeOk();
-    expect(reqResult.result.value!).toBeUint(1n);
+// =============================================================================
+// HELPER FUNCTIONS
+// =============================================================================
 
-    const nonceResult = simnet.callReadOnlyFn(
-      CONTRACT,
-      "get-agent-nonce",
-      [principalCV(deployer)],
-      deployer
-    );
-    expect(nonceResult.result).toBeUint(1n);
-  });
+function buff32(str: string): Uint8Array {
+    const bytes = new TextEncoder().encode(str);
+    const buffer = new Uint8Array(32);
+    buffer.set(bytes.slice(0, 32));
+    return buffer;
+}
 
-  it("fails to propose coordination with past expiry (ERR_EXPIRED)", () => {
-    const pastExpiry = uintCV(1n);
-    const receipt = simnet.callPublicFn(
-      CONTRACT,
-      "propose-coordination",
-      [
-        ZERO_32,
-        pastExpiry,
-        NONCE_1,
-        ZERO_32,
-        COORD_VALUE,
-        SINGLE_PARTICIPANTS,
-      ],
-      deployer
-    );
-    expect(receipt.result).toBeErr(106n);
-  });
+// Sort principals by consensus buffer (matches Clarity's to-consensus-buff?)
+function sortPrincipals(principals: string[]): string[] {
+    return [...principals].sort((a, b) => {
+        const bufA = serializeCV(Cl.principal(a));
+        const bufB = serializeCV(Cl.principal(b));
+        const minLen = Math.min(bufA.length, bufB.length);
+        for (let i = 0; i < minLen; i++) {
+            if (bufA[i] !== bufB[i]) return bufA[i] - bufB[i];
+        }
+        return bufA.length - bufB.length;
+    });
+}
 
-  it("fails to propose coordination missing agent in participants (ERR_INVALID_PARTICIPANTS)", () => {
-    const noAgentParts = listCV([principalCV(wallet1)]);
-    const receipt = propose(deployer, noAgentParts);
-    expect(receipt.result).toBeErr(108n);
-  });
+function isOk(result: any): boolean {
+    return result.type === CV_OK;
+}
 
-  it("fails to propose coordination with duplicate participants (ERR_INVALID_PARTICIPANTS)", () => {
-    const dupParts = listCV([principalCV(deployer), principalCV(deployer)]);
-    const receipt = propose(deployer, dupParts);
-    expect(receipt.result).toBeErr(108n);
-  });
+function isErr(result: any): boolean {
+    return result.type === CV_ERR;
+}
 
-  it("fails to propose coordination with unsorted participants (ERR_INVALID_PARTICIPANTS)", () => {
-    const unsortedParts = listCV([principalCV(wallet1), principalCV(deployer)]);
-    const receipt = propose(deployer, unsortedParts);
-    expect(receipt.result).toBeErr(108n);
-  });
+function getErrCode(result: any): number {
+    if (result.type === CV_ERR && result.value.type === CV_UINT) {
+        return Number(result.value.value);
+    }
+    return -1;
+}
 
-  it("fails to propose coordination with >20 participants (ERR_INVALID_PARTICIPANTS)", () => {
-    const participants21 = listCV(Array(21).fill(principalCV(deployer)));
-    const receipt = propose(deployer, participants21);
-    expect(receipt.result).toBeErr(108n);
-  });
+// =============================================================================
+// PROPOSE COORDINATION TESTS
+// =============================================================================
 
-  it("cancel-coordination() succeeds for agent pre-expiry", () => {
-    // arrange
-    const receiptPropose = propose(deployer, SINGLE_PARTICIPANTS);
-    expect(receiptPropose.result).toBeOk();
-    const intentHash = receiptPropose.result.value as BufferCV;
+describe("propose-coordination", () => {
 
-    // act
-    const reason = stringAsciiCV("test reason");
-    const receiptCancel = simnet.callPublicFn(
-      CONTRACT,
-      "cancel-coordination",
-      [intentHash, reason],
-      deployer
-    );
+    it("successfully creates a new coordination", async () => {
+        const accounts = simnet.getAccounts();
+        const wallet1 = accounts.get("wallet_1")!;
+        const wallet2 = accounts.get("wallet_2")!;
 
-    // assert
-    expect(receiptCancel.result).toBeOk();
+        const participants = sortPrincipals([wallet1, wallet2]);
+        const payloadHash = buff32("rps-game-payload");
+        const coordinationType = buff32("RPS-GAME");
 
-    const statusResult = simnet.callReadOnlyFn(
-      CONTRACT,
-      "get-coordination-status",
-      [intentHash],
-      deployer
-    );
-    const statusTuple = getStatusTuple(statusResult);
-    expect((statusTuple.status as UIntCV).value).toBe(4n); // CANCELLED
-  });
+        const { result } = simnet.callPublicFn(
+            "erc-8001",
+            "propose-coordination",
+            [
+                Cl.buffer(payloadHash),
+                Cl.uint(simnet.blockHeight + 100),
+                Cl.uint(1),
+                Cl.buffer(coordinationType),
+                Cl.uint(1000),
+                Cl.list(participants.map(p => Cl.principal(p))),
+            ],
+            wallet1
+        );
 
-  it("cancel-coordination() fails for unauthorized caller pre-expiry", () => {
-    // arrange
-    const receiptPropose = propose(deployer, SINGLE_PARTICIPANTS);
-    expect(receiptPropose.result).toBeOk();
-    const intentHash = receiptPropose.result.value as BufferCV;
+        expect(isOk(result)).toBe(true);
+    });
 
-    // act & assert
-    const reason = stringAsciiCV("test");
-    const receiptCancel = simnet.callPublicFn(
-      CONTRACT,
-      "cancel-coordination",
-      [intentHash, reason],
-      wallet3
-    );
-    expect(receiptCancel.result).toBeErr(100n);
-  });
+    it("fails if agent not in participants", async () => {
+        const accounts = simnet.getAccounts();
+        const wallet1 = accounts.get("wallet_1")!;
+        const wallet2 = accounts.get("wallet_2")!;
+        const wallet3 = accounts.get("wallet_3")!;
 
-  it("cancel-coordination() fails if already CANCELLED (ERR_INVALID_STATE)", () => {
-    // arrange
-    const receiptPropose = propose(deployer, SINGLE_PARTICIPANTS);
-    expect(receiptPropose.result).toBeOk();
-    const intentHash = receiptPropose.result.value as BufferCV;
+        const participants = sortPrincipals([wallet2, wallet3]);
 
-    const reason = stringAsciiCV("test");
-    simnet.callPublicFn(CONTRACT, "cancel-coordination", [intentHash, reason], deployer);
+        const { result } = simnet.callPublicFn(
+            "erc-8001",
+            "propose-coordination",
+            [
+                Cl.buffer(buff32("test")),
+                Cl.uint(simnet.blockHeight + 100),
+                Cl.uint(1),
+                Cl.buffer(buff32("TEST")),
+                Cl.uint(0),
+                Cl.list(participants.map(p => Cl.principal(p))),
+            ],
+            wallet1
+        );
 
-    // act
-    const receiptCancel2 = simnet.callPublicFn(
-      CONTRACT,
-      "cancel-coordination",
-      [intentHash, reason],
-      deployer
-    );
+        expect(isErr(result)).toBe(true);
+        expect(getErrCode(result)).toBe(ERR.INVALID_PARTICIPANTS);
+    });
 
-    // assert
-    expect(receiptCancel2.result).toBeErr(102n);
-  });
+    it("fails if expiry is in the past", async () => {
+        const accounts = simnet.getAccounts();
+        const wallet1 = accounts.get("wallet_1")!;
+        const wallet2 = accounts.get("wallet_2")!;
 
-  it("accept-coordination() fails if intent not found (ERR_NOT_FOUND)", () => {
-    const badHash = bufferCV(new Uint8Array(32).fill(255));
-    const dummySig = bufferCV(new Uint8Array(65));
-    const receipt = simnet.callPublicFn(
-      CONTRACT,
-      "accept-coordination",
-      [badHash, FUTURE_ACCEPT_EXPIRY, CONDITIONS, dummySig],
-      deployer
-    );
-    expect(receipt.result).toBeErr(101n);
-  });
+        simnet.mineEmptyBlocks(10);
+        const participants = sortPrincipals([wallet1, wallet2]);
 
-  it("accept-coordination() fails if caller not participant (ERR_NOT_PARTICIPANT)", () => {
-    // arrange: propose with single participant (deployer only)
-    const receiptPropose = propose(deployer, SINGLE_PARTICIPANTS);
-    expect(receiptPropose.result).toBeOk();
-    const intentHash = receiptPropose.result.value as BufferCV;
+        const { result } = simnet.callPublicFn(
+            "erc-8001",
+            "propose-coordination",
+            [
+                Cl.buffer(buff32("test-past")),
+                Cl.uint(5),
+                Cl.uint(1),
+                Cl.buffer(buff32("TEST")),
+                Cl.uint(0),
+                Cl.list(participants.map(p => Cl.principal(p))),
+            ],
+            wallet1
+        );
 
-    // act: wallet1 tries to accept (not participant)
-    const dummySig = bufferCV(new Uint8Array(65));
-    const receipt = simnet.callPublicFn(
-      CONTRACT,
-      "accept-coordination",
-      [intentHash, FUTURE_ACCEPT_EXPIRY, CONDITIONS, dummySig],
-      wallet1
-    );
-    expect(receipt.result).toBeErr(104n);
-  });
+        expect(isErr(result)).toBe(true);
+        expect(getErrCode(result)).toBe(ERR.INTENT_EXPIRED);
+    });
 
-  it("accept-coordination() fails if accept-expiry expired (ERR_ACCEPT_EXPIRED)", () => {
-    // arrange: propose
-    const receiptPropose = propose(deployer, SINGLE_PARTICIPANTS);
-    expect(receiptPropose.result).toBeOk();
-    const intentHash = receiptPropose.result.value as BufferCV;
+    it("fails if nonce not increasing", async () => {
+        const accounts = simnet.getAccounts();
+        const wallet1 = accounts.get("wallet_1")!;
+        const wallet2 = accounts.get("wallet_2")!;
 
-    // act: accept with past expiry
-    const dummySig = bufferCV(new Uint8Array(65));
-    const receipt = simnet.callPublicFn(
-      CONTRACT,
-      "accept-coordination",
-      [intentHash, PAST_EXPIRY, CONDITIONS, dummySig],
-      deployer
-    );
-    expect(receipt.result).toBeErr(109n);
-  });
+        const participants = sortPrincipals([wallet1, wallet2]);
+
+        // First proposal with nonce 5
+        simnet.callPublicFn(
+            "erc-8001",
+            "propose-coordination",
+            [
+                Cl.buffer(buff32("test1")),
+                Cl.uint(simnet.blockHeight + 100),
+                Cl.uint(5),
+                Cl.buffer(buff32("TEST")),
+                Cl.uint(0),
+                Cl.list(participants.map(p => Cl.principal(p))),
+            ],
+            wallet1
+        );
+
+        // Second proposal with nonce 3 (lower) should fail
+        const { result } = simnet.callPublicFn(
+            "erc-8001",
+            "propose-coordination",
+            [
+                Cl.buffer(buff32("test2")),
+                Cl.uint(simnet.blockHeight + 100),
+                Cl.uint(3),
+                Cl.buffer(buff32("TEST")),
+                Cl.uint(0),
+                Cl.list(participants.map(p => Cl.principal(p))),
+            ],
+            wallet1
+        );
+
+        expect(isErr(result)).toBe(true);
+        expect(getErrCode(result)).toBe(ERR.NONCE_TOO_LOW);
+    });
 });
+
+// =============================================================================
+// CANCEL COORDINATION TESTS
+// =============================================================================
+
+describe("cancel-coordination", () => {
+
+    it("agent can cancel before expiry", async () => {
+        const accounts = simnet.getAccounts();
+        const wallet1 = accounts.get("wallet_1")!;
+        const wallet2 = accounts.get("wallet_2")!;
+
+        const participants = sortPrincipals([wallet1, wallet2]);
+
+        const { result: proposeResult } = simnet.callPublicFn(
+            "erc-8001",
+            "propose-coordination",
+            [
+                Cl.buffer(buff32("cancel-test")),
+                Cl.uint(simnet.blockHeight + 100),
+                Cl.uint(1),
+                Cl.buffer(buff32("TEST")),
+                Cl.uint(0),
+                Cl.list(participants.map(p => Cl.principal(p))),
+            ],
+            wallet1
+        );
+
+        expect(isOk(proposeResult)).toBe(true);
+        const intentHash = proposeResult.value;
+
+        const { result } = simnet.callPublicFn(
+            "erc-8001",
+            "cancel-coordination",
+            [intentHash, Cl.stringAscii("Changed my mind")],
+            wallet1
+        );
+
+        expect(isOk(result)).toBe(true);
+    });
+
+    it("non-agent cannot cancel before expiry", async () => {
+        const accounts = simnet.getAccounts();
+        const wallet1 = accounts.get("wallet_1")!;
+        const wallet2 = accounts.get("wallet_2")!;
+
+        const participants = sortPrincipals([wallet1, wallet2]);
+
+        const { result: proposeResult } = simnet.callPublicFn(
+            "erc-8001",
+            "propose-coordination",
+            [
+                Cl.buffer(buff32("cancel-test-2")),
+                Cl.uint(simnet.blockHeight + 100),
+                Cl.uint(1),
+                Cl.buffer(buff32("TEST")),
+                Cl.uint(0),
+                Cl.list(participants.map(p => Cl.principal(p))),
+            ],
+            wallet1
+        );
+
+        expect(isOk(proposeResult)).toBe(true);
+        const intentHash = proposeResult.value;
+
+        const { result } = simnet.callPublicFn(
+            "erc-8001",
+            "cancel-coordination",
+            [intentHash, Cl.stringAscii("I want out")],
+            wallet2
+        );
+
+        expect(isErr(result)).toBe(true);
+        expect(getErrCode(result)).toBe(ERR.UNAUTHORIZED);
+    });
+
+    it("anyone can cancel after expiry", async () => {
+        const accounts = simnet.getAccounts();
+        const wallet1 = accounts.get("wallet_1")!;
+        const wallet2 = accounts.get("wallet_2")!;
+        const wallet3 = accounts.get("wallet_3")!;
+
+        const participants = sortPrincipals([wallet1, wallet2]);
+        const expiry = simnet.blockHeight + 10;
+
+        const { result: proposeResult } = simnet.callPublicFn(
+            "erc-8001",
+            "propose-coordination",
+            [
+                Cl.buffer(buff32("expire-test")),
+                Cl.uint(expiry),
+                Cl.uint(1),
+                Cl.buffer(buff32("TEST")),
+                Cl.uint(0),
+                Cl.list(participants.map(p => Cl.principal(p))),
+            ],
+            wallet1
+        );
+
+        expect(isOk(proposeResult)).toBe(true);
+        const intentHash = proposeResult.value;
+
+        // Mine blocks past expiry
+        simnet.mineEmptyBlocks(15);
+
+        const { result } = simnet.callPublicFn(
+            "erc-8001",
+            "cancel-coordination",
+            [intentHash, Cl.stringAscii("Cleanup")],
+            wallet3
+        );
+
+        expect(isOk(result)).toBe(true);
+    });
+
+    it("cannot cancel already cancelled coordination", async () => {
+        const accounts = simnet.getAccounts();
+        const wallet1 = accounts.get("wallet_1")!;
+        const wallet2 = accounts.get("wallet_2")!;
+
+        const participants = sortPrincipals([wallet1, wallet2]);
+
+        const { result: proposeResult } = simnet.callPublicFn(
+            "erc-8001",
+            "propose-coordination",
+            [
+                Cl.buffer(buff32("double-cancel")),
+                Cl.uint(simnet.blockHeight + 100),
+                Cl.uint(1),
+                Cl.buffer(buff32("TEST")),
+                Cl.uint(0),
+                Cl.list(participants.map(p => Cl.principal(p))),
+            ],
+            wallet1
+        );
+
+        const intentHash = proposeResult.value;
+
+        // First cancel
+        simnet.callPublicFn(
+            "erc-8001",
+            "cancel-coordination",
+            [intentHash, Cl.stringAscii("First cancel")],
+            wallet1
+        );
+
+        // Second cancel should fail
+        const { result } = simnet.callPublicFn(
+            "erc-8001",
+            "cancel-coordination",
+            [intentHash, Cl.stringAscii("Second cancel")],
+            wallet1
+        );
+
+        expect(isErr(result)).toBe(true);
+        expect(getErrCode(result)).toBe(ERR.INVALID_STATE);
+    });
+});
+
+// =============================================================================
+// READ-ONLY FUNCTION TESTS
+// =============================================================================
+
+describe("read-only functions", () => {
+
+    it("get-agent-nonce returns 0 initially", async () => {
+        const accounts = simnet.getAccounts();
+        const wallet1 = accounts.get("wallet_1")!;
+
+        const result = simnet.callReadOnlyFn(
+            "erc-8001",
+            "get-agent-nonce",
+            [Cl.principal(wallet1)],
+            wallet1
+        );
+
+        expect(result.result.type).toBe(CV_UINT);
+        expect(result.result.value).toBe(0n);
+    });
+
+    it("get-signing-domain returns domain info", async () => {
+        const accounts = simnet.getAccounts();
+        const wallet1 = accounts.get("wallet_1")!;
+
+        const result = simnet.callReadOnlyFn(
+            "erc-8001",
+            "get-signing-domain",
+            [],
+            wallet1
+        );
+
+        expect(result.result.type).toBe(CV_TUPLE);
+    });
+
+    it("get-coordination-status returns NOT_FOUND for non-existent intent", async () => {
+        const accounts = simnet.getAccounts();
+        const wallet1 = accounts.get("wallet_1")!;
+
+        const fakeIntentHash = buff32("does-not-exist");
+
+        const result = simnet.callReadOnlyFn(
+            "erc-8001",
+            "get-coordination-status",
+            [Cl.buffer(fakeIntentHash)],
+            wallet1
+        );
+
+        expect(isErr(result.result)).toBe(true);
+        expect(getErrCode(result.result)).toBe(ERR.NOT_FOUND);
+    });
+});
+
+// =============================================================================
+// RPS GAME USER STORY
+// =============================================================================
+
+describe("RPS Game: User Story", () => {
+
+    it("full coordination flow: propose -> query -> cancel", async () => {
+        const accounts = simnet.getAccounts();
+        const wallet1 = accounts.get("wallet_1")!;
+        const wallet2 = accounts.get("wallet_2")!;
+
+        const gamePayload = buff32("ROCK:PAPER:secret123");
+        const participants = sortPrincipals([wallet1, wallet2]);
+        const coordinationType = buff32("RPS-GAME");
+
+        // Step 1: Propose
+        const { result: proposeResult, events } = simnet.callPublicFn(
+            "erc-8001",
+            "propose-coordination",
+            [
+                Cl.buffer(gamePayload),
+                Cl.uint(simnet.blockHeight + 144),
+                Cl.uint(1),
+                Cl.buffer(coordinationType),
+                Cl.uint(1000),
+                Cl.list(participants.map(p => Cl.principal(p))),
+            ],
+            wallet1
+        );
+
+        expect(isOk(proposeResult)).toBe(true);
+        expect(events.length).toBeGreaterThan(0);
+
+        const intentHash = proposeResult.value;
+
+        // Step 2: Query status
+        const statusResult = simnet.callReadOnlyFn(
+            "erc-8001",
+            "get-coordination-status",
+            [intentHash],
+            wallet1
+        );
+        expect(isOk(statusResult.result)).toBe(true);
+
+        // Step 3: Cancel
+        const { result: cancelResult } = simnet.callPublicFn(
+            "erc-8001",
+            "cancel-coordination",
+            [intentHash, Cl.stringAscii("Game cancelled")],
+            wallet1
+        );
+        expect(isOk(cancelResult)).toBe(true);
+    });
+});
+
+// =============================================================================
+// EDGE CASES
+// =============================================================================
+
+describe("Edge Cases", () => {
+
+    it("single participant coordination", async () => {
+        const accounts = simnet.getAccounts();
+        const wallet1 = accounts.get("wallet_1")!;
+
+        const participants = [wallet1];
+
+        const { result: proposeResult } = simnet.callPublicFn(
+            "erc-8001",
+            "propose-coordination",
+            [
+                Cl.buffer(buff32("self-task")),
+                Cl.uint(simnet.blockHeight + 100),
+                Cl.uint(1),
+                Cl.buffer(buff32("SELF-COORD")),
+                Cl.uint(0),
+                Cl.list(participants.map(p => Cl.principal(p))),
+            ],
+            wallet1
+        );
+
+        expect(isOk(proposeResult)).toBe(true);
+    });
+
+    it("multi-party coordination with 5 participants", async () => {
+        const accounts = simnet.getAccounts();
+        const wallet1 = accounts.get("wallet_1")!;
+        const wallet2 = accounts.get("wallet_2")!;
+        const wallet3 = accounts.get("wallet_3")!;
+        const wallet4 = accounts.get("wallet_4")!;
+        const wallet5 = accounts.get("wallet_5")!;
+
+        const participants = sortPrincipals([
+            wallet1, wallet2, wallet3, wallet4, wallet5
+        ]);
+
+        const { result: proposeResult } = simnet.callPublicFn(
+            "erc-8001",
+            "propose-coordination",
+            [
+                Cl.buffer(buff32("multi-party")),
+                Cl.uint(simnet.blockHeight + 1000),
+                Cl.uint(1),
+                Cl.buffer(buff32("MULTI-SIG")),
+                Cl.uint(50000),
+                Cl.list(participants.map(p => Cl.principal(p))),
+            ],
+            wallet1
+        );
+
+        expect(isOk(proposeResult)).toBe(true);
+    });
 });

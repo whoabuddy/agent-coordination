@@ -1,25 +1,28 @@
 [project]
-name = 'agent-coordination'
-description = ''
+name = "erc-8001-agent-coordination"
+description = "ERC-8001 Agent Coordination Protocol for Stacks with RPS Game Example"
 authors = []
 telemetry = false
-cache_dir = './.cache'
-requirements = []
-[contracts.erc-8001]
-path = 'contracts/erc-8001.clar'
-clarity_version = 4
-epoch = 'latest'
-[repl.analysis]
-passes = ['check_checker']
+cache_dir = "./.cache"
 
-[repl.analysis.lints]
+# Main coordination contract (Clarity 3 version)
+[contracts.erc-8001]
+path = "contracts/erc-8001.clar"
+clarity_version = 3
+epoch = 3.0
+
+# Rock-Paper-Scissors game extension
+[contracts.rps-game]
+path = "contracts/rps-game.clar"
+clarity_version = 3
+epoch = 3.0
+depends_on = ["erc-8001"]
+
+[repl.analysis]
+passes = ["check_checker"]
 
 [repl.analysis.check_checker]
-strict = false
+strict = true
 trusted_sender = false
 trusted_caller = false
 callee_filter = false
-
-[repl.remote_data]
-enabled = false
-api_url = 'https://api.hiro.so'

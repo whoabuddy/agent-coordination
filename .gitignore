@@ -1,14 +1,26 @@
+# Dependency management
+/node_modules
+/target
 
-**/settings/Mainnet.toml
-**/settings/Testnet.toml
-.cache/**
-history.txt
+# Build artifacts
+/build
+/dist
+/pkg
 
-logs
-*.log
-npm-debug.log*
-coverage
-*.info
-costs-reports.json
-node_modules
-.aider*
+# Environment-specific or generated files
+settings/*.toml.local
+Devnet.toml
+Testnet.toml
+Mainnet.toml
+
+# OS and IDE specific files
+.DS_Store
+.idea
+.vscode
+*.suo
+*.user
+Thumbs.db
+.idea/agent-coordination.iml
+.idea/misc.xml
+.idea/modules.xml
+.idea/vcs.xml
