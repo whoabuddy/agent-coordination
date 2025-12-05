@@ -354,18 +354,16 @@
           }
         )
         (map-set agent-nonces {agent: agent} nonce)
-        (contract-event
-          (tuple
-            {notification: (string-ascii 34 "erc-8001/coordination-proposed")
+        (print
+            {notification: "erc-8001/coordination-proposed",
              payload:
-               (tuple
-                 {intent-hash: intent-hash
-                  proposer: agent
-                  coordination-type: coord-type
-                  participant-count: (len participants)
+                 {intent-hash: intent-hash,
+                  proposer: agent,
+                  coordination-type: coord-type,
+                  participant-count: (len participants),
                   coordination-value: coord-value}
-               )}
-          )
+               }
+          
         )
         (ok intent-hash)
       )
@@ -418,18 +416,16 @@
               (merge intent
                 {accept-count: new-count, status: new-status}))
             (let ((acceptance-h (acceptance-struct-hash intent-hash caller accept-nonce accept-expiry conditions)))
-              (contract-event
-                (tuple
-                  {notification: (string-ascii 34 "erc-8001/coordination-accepted")
+              (print
+                  {notification: "erc-8001/coordination-accepted",
                    payload:
-                     (tuple
-                       {intent-hash: intent-hash
-                        participant: caller
-                        acceptance-hash: acceptance-h
-                        accepted-count: new-count
+                       {intent-hash: intent-hash,
+                        participant: caller,
+                        acceptance-hash: acceptance-h,
+                        accepted-count: new-count,
                         required-count: total}
-                     )}
-                )
+                     }
+                
               )
               (ok (>= new-count total))
             )
@@ -481,18 +477,16 @@
           (new-intent (merge intent {status: EXECUTED}))
         )
         (map-set intents {intent-hash: intent-hash} new-intent)
-        (contract-event
-          (tuple
-            {notification: (string-ascii 34 "erc-8001/coordination-executed")
+        (print
+            {notification: "erc-8001/coordination-executed",
              payload:
-               (tuple
-                 {intent-hash: intent-hash
-                  executor: tx-sender
-                  success: true
-                  gas-used: u0
+                 {intent-hash: intent-hash,
+                  executor: tx-sender,
+                  success: true,
+                  gas-used: u0,
                   result: 0x}
-               )}
-          )
+               }
+          
         )
         (ok 0x)
       )
@@ -517,17 +511,15 @@
       (asserts! (not (is-eq (get status intent) CANCELLED)) ERR_INVALID_STATE)
       (asserts! (or (is-eq tx-sender agent) (> now (get expiry intent))) ERR_UNAUTHORIZED)
       (map-set intents {intent-hash: intent-hash} (merge intent {status: CANCELLED}))
-      (contract-event
-        (tuple
-          {notification: (string-ascii 34 "erc-8001/coordination-cancelled")
+      (print
+          {notification: "erc-8001/coordination-cancelled",
            payload:
-             (tuple
-               {intent-hash: intent-hash
-                canceller: tx-sender
-                reason: reason
+               {intent-hash: intent-hash,
+                canceller: tx-sender,
+                reason: reason,
                 final-status: CANCELLED}
-             )}
-        )
+             }
+        
       )
       (ok true)
     )
